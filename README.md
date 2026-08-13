@@ -34,8 +34,9 @@ The system coordinates three main modules to build a continuous, real-time feedb
 ## ⚡ Features
 
 *   **Real-time Object Detection:** Detects pedestrians, chairs, bottles, laptops, and vehicles in real-time.
-*   **Proximity Estimation:** Classifies obstacle distance based on bounding box width ratio (`very close`, `moderately close`, and `far`).
-*   **Spatial Mapping:** Splits the visual field into three distinct zones (Left, Center, Right) using divider guidelines.
+*   **Clock-Position Navigation:** Divides the frame into 6 visual sectors from 9 o'clock to 3 o'clock to provide natural directions (e.g. `"Person at 11 o'clock"`).
+*   **Proximity Estimation & Prioritization:** Classifies obstacle distance and automatically sorts alerts to warn about the closest hazard first.
+*   **Visual Vector HUD:** Draws a real-time vector arrow from the bottom center pointing directly to the nearest hazard, dynamically color-coded by threat level.
 *   **Non-Blocking TTS Warnings:** Uses background threads to speak warnings seamlessly without freezing the camera stream.
 *   **CPU Optimization:** Limits inference processing to once per second while keeping the display stream fluid.
 
@@ -60,7 +61,7 @@ The system coordinates three main modules to build a continuous, real-time feedb
 
 3. **Install Dependencies:**
    ```bash
-   pip install ultralytics opencv-python pyttsx3
+   pip install -r requirements.txt
    ```
 
 ---
@@ -75,11 +76,15 @@ python assistive_system.py
 
 ---
 
-## 📅 Roadmap / Future Improvements
+## 📅 Roadmap & Next Steps
 
-*   [ ] **Clock-Face Navigation:** Implement direction reporting using the clock system (e.g., *"Obstacle at 11 o'clock"* instead of *"on your left"*).
-*   [ ] **Hazard Prioritization:** Automatically sort obstacles by closeness and speak the most urgent alert first.
-*   [ ] **GUI Navigation Arrows:** Draw graphical overlays (e.g. arrows and proximity alerts) to make the demo feed more interactive for presentations.
+Detailed tasks can be tracked in [next_steps.md](file:///e:/Downloads/SEM%207/Computer%20Vision/Project/next_steps.md):
+*   [x] **Clock-Face Navigation**
+*   [x] **Hazard Prioritization** (announce closest obstacle first)
+*   [x] **GUI Navigation Arrows**
+*   [ ] **Concurrency Run Loop Fix** (fixes overlapping speech engine clashing)
+*   [ ] **Auditory Pulse Warning Frequency** (varying alert rate by proximity)
+*   [ ] **Real-World Distance Estimation** (calibrating pixel-widths to estimate physical meters)
 
 ---
 
