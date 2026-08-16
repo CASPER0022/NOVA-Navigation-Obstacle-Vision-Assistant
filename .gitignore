@@ -161,3 +161,6 @@ runs/
 *.png
 !References/Diagram.png
 !References/*.png
+
+# Metrics logs (run artifacts, not source)
+logs/

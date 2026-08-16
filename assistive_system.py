@@ -3,12 +3,19 @@ from ultralytics import YOLO
 import pyttsx3
 import time
 import threading
+from collections import deque
+
+from metrics_logger import MetricsLogger
 
 # Initialize YOLO model
 model = YOLO('yolov8n.pt')
 
+metrics = MetricsLogger()
+
 # Threaded speak function to prevent freezing
 def speak(text):
+    metrics.log_tts_event("attempt", text)
+
     def _run_speech():
         try:
             # Initialize engine inside the thread to avoid Windows COM thread issues
@@ -16,8 +23,10 @@ def speak(text):
             th_engine.setProperty('rate', 170)  # slightly faster speech
             th_engine.say(text)
             th_engine.runAndWait()
+            metrics.log_tts_event("success", text)
         except Exception as e:
             print(f"Speech error: {e}")
+            metrics.log_tts_event("error", str(e))
 
     # Start speech in a daemon background thread
     threading.Thread(target=_run_speech, daemon=True).start()
@@ -35,6 +44,17 @@ inference_interval = 1.0  # seconds
 # Store the latest bounding boxes to draw between runs
 latest_detections = []
 
+# Track when each obstacle label was first seen, to measure alert latency
+first_seen_ts = {}
+# Labels already logged (so repeat cooldown-throttled warnings for a still-present
+# object don't re-log ever-growing "latency" against the original first-seen time)
+latency_logged_labels = set()
+last_inference_duration = 0.0
+
+# Rolling frame-time window for FPS measurement
+frame_times = deque(maxlen=60)
+last_fps_log_time = 0.0
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -42,12 +62,24 @@ while True:
 
     height, width, _ = frame.shape
     current_time = time.time()
-    
+
+    frame_times.append(current_time)
+    if len(frame_times) >= 2:
+        fps = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0])
+        cv2.putText(frame, f"FPS: {fps:.1f}", (width - 120, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        if current_time - last_fps_log_time >= 1.0:
+            metrics.log_fps_sample(fps)
+            last_fps_log_time = current_time
+
     # 1. Run inference ONLY if 1 second has passed
     if current_time - last_inference_time >= inference_interval:
+        inference_start = time.time()
         results = model(frame, stream=False, verbose=False) # verbose=False cleans up console output
+        last_inference_duration = time.time() - inference_start
         latest_detections = []
         obstacles_detected = []
+        seen_labels_this_cycle = set()
 
         for result in results:
             for box in result.boxes:
@@ -79,8 +111,20 @@ while True:
                     latest_detections.append((x1, y1, x2, y2, label, proximity, direction, width_ratio))
                     obstacles_detected.append({
                         'text': f"{label} {direction}, {proximity}",
-                        'width_ratio': width_ratio
+                        'width_ratio': width_ratio,
+                        'label': label
                     })
+
+                    seen_labels_this_cycle.add(label)
+                    if label not in first_seen_ts:
+                        first_seen_ts[label] = current_time
+
+        # Drop labels that are no longer in frame so a future re-appearance
+        # is timed as a fresh detection, not stale latency.
+        for stale_label in list(first_seen_ts.keys()):
+            if stale_label not in seen_labels_this_cycle:
+                del first_seen_ts[stale_label]
+                latency_logged_labels.discard(stale_label)
 
         last_inference_time = current_time
 
@@ -89,9 +133,16 @@ while True:
 
         # 2. Speak warnings if any are detected (already handled by cooldown)
         if obstacles_detected and (current_time - last_speech_time > speech_cooldown):
-            warning_msg = obstacles_detected[0]['text']
+            top_obstacle = obstacles_detected[0]
+            warning_msg = top_obstacle['text']
             print(f"Alert: {warning_msg}")
             speak(warning_msg)
+            speak_ts = time.time()
+            label = top_obstacle['label']
+            if label not in latency_logged_labels:
+                detect_ts = first_seen_ts.get(label, current_time)
+                metrics.log_alert_latency(label, detect_ts, speak_ts, last_inference_duration)
+                latency_logged_labels.add(label)
             last_speech_time = current_time
 
     # 3. Draw the LATEST detections on the live frame (keeps visuals smooth)
@@ -148,3 +199,4 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
+metrics.close()
