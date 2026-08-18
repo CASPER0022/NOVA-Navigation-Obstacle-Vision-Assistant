@@ -55,3 +55,19 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 ### 10. 🗣️ High-Fidelity Neural TTS
 - **Goal:** Upgrade the robotic speech voice to a premium, natural human voice.
 - **Description:** Switch from basic offline `pyttsx3` to a neural voice synthesizer (like `edge-tts` or ElevenLabs). Choose a British male voice profile (like `en-GB-RyanNeural`) for that premium, conversational Jarvis aesthetic.
+
+---
+
+## 💡 Low-Latency Design Strategy (Avoiding LLM Delays)
+
+Because this is a real-time safety application, we must maintain sub-100ms latency for hazards. When implementing the conversational "Jarvis" features above, apply these architecture tips:
+
+### 1. ⚡ Dual-Path (Hybrid) Processing
+- **Fast Path (Instant Avoidance):** If a hazard is detected at a critical distance (e.g., `< 1.0` meter), bypass the LLM entirely and immediately play an alarm tone or direct system warning (e.g., *"Stop!"*). This runs locally at **~10-30ms** latency.
+- **Slow Path (Conversational Guidance):** Feed the LLM coordinates in the background. Trigger conversational descriptions at a slower rate (e.g., every 8-10 seconds) or *only when the user asks a question* (e.g., *"What is in front of me?"*), where a 1-second delay is naturally acceptable.
+
+### 2. 🏠 Local Small Language Models (SLMs)
+- Run a tiny, highly quantized model (such as **Llama-3.2-1B** or **Phi-3.5-mini**) locally via Ollama. This keeps processing offline and reduces generation start time to under **200ms**.
+
+### 3. 🔄 Template-Based Speech Chaining (0ms Conversational Fallback)
+- Maintain a list of pre-defined conversational sentence variations (e.g., *"Watch out for the...", "Mind the...", "You have a... ahead"*). Mix and match these programmatically based on detection values. This sounds human-like and conversational, but executes instantaneously with zero compute overhead.
