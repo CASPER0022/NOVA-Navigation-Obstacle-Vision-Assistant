@@ -3,8 +3,8 @@ from ultralytics import YOLO
 import pyttsx3
 import time
 import threading
-
 import queue
+import sys
 
 # Initialize YOLO model
 model = YOLO('yolov8n.pt')
@@ -70,12 +70,26 @@ def get_best_camera_index():
         return 0
         
     print(f"Detected working camera indices: {working_indices}")
-    # The external USB camera is registered after the integrated webcam, so it has the highest index
     selected_index = working_indices[-1]
-    print(f"Selected Camera Index {selected_index} (highest index preferred for external USB).")
+    print(f"Auto-selected Camera Index {selected_index} (highest index).")
     return selected_index
 
-camera_index = get_best_camera_index()
+# Allow manual override via command line parameter: python .\assistive_system.py <index>
+if len(sys.argv) > 1:
+    try:
+        camera_index = int(sys.argv[1])
+        print(f"Using manually specified Camera Index: {camera_index}")
+    except ValueError:
+        print("Invalid index format. Running auto-scan...")
+        camera_index = get_best_camera_index()
+else:
+    print("----------------------------------------------------------------")
+    print("Tip: If the system uses the wrong camera, override it by running:")
+    print("     python .\\assistive_system.py <index>")
+    print("     Example: python .\\assistive_system.py 0   (to use index 0)")
+    print("----------------------------------------------------------------")
+    camera_index = get_best_camera_index()
+
 cap = cv2.VideoCapture(camera_index)
 
 # Track inference rate (1 detection run per second)
