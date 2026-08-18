@@ -53,7 +53,11 @@ speech_cooldown = 3.0  # Speak warnings at most every 3 seconds
 active_hazards = {}        # (label, direction) -> (last_seen_time, proximity)
 last_heartbeat_times = {}  # (label, direction) -> last_alert_time
 
-cap = cv2.VideoCapture(0)
+# Try opening external USB camera (usually index 1) first, fallback to integrated camera (index 0)
+cap = cv2.VideoCapture(1)
+if not cap.isOpened():
+    print("USB Camera (Index 1) not found or busy. Falling back to Integrated Camera (Index 0).")
+    cap = cv2.VideoCapture(0)
 
 # Track inference rate (1 detection run per second)
 last_inference_time = 0
