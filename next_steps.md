@@ -40,4 +40,18 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 
 ## 🏃 Upcoming Tasks (Next Steps)
 
-*All core goals on the initial project roadmap have been successfully implemented!* 🎉
+### 7. 👁️ State Tracking & Change Detection (Stop Repetitive Alerts)
+- **Goal:** Stop repeating the same warnings if the environment hasn't changed.
+- **Description:** Implement an object tracking state machine. Only speak warnings when a new obstacle appears, disappears, or changes its danger level (e.g., moves from "far" to "very close"), keeping the system clean and silent otherwise.
+
+### 8. 🧠 Conversational Jarvis LLM Integration
+- **Goal:** Feed detections into a Large Language Model (local via Ollama, or online via Gemini API) to generate natural, human-like guidance.
+- **Description:** Send structured obstacle coordinates to the model and instruct it to roleplay as an assistant. Instead of *"bottle 12 o'clock very close"*, it will say: *"Careful, there is a water bottle right in front of you. There is also a chair to your right if you want to rest."*
+
+### 9. 🎙️ Interactive Voice Queries & Wake Word ("Hey Jarvis")
+- **Goal:** Allow the user to ask the system questions.
+- **Description:** Implement an offline speech-to-text (STT) listener. The user can say *"Hey Jarvis, is the path clear?"* or *"Where is my coffee cup?"*, and the system checks the YOLO coordinates to answer dynamically.
+
+### 10. 🗣️ High-Fidelity Neural TTS
+- **Goal:** Upgrade the robotic speech voice to a premium, natural human voice.
+- **Description:** Switch from basic offline `pyttsx3` to a neural voice synthesizer (like `edge-tts` or ElevenLabs). Choose a British male voice profile (like `en-GB-RyanNeural`) for that premium, conversational Jarvis aesthetic.
