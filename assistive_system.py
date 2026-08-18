@@ -53,11 +53,30 @@ speech_cooldown = 3.0  # Speak warnings at most every 3 seconds
 active_hazards = {}        # (label, direction) -> (last_seen_time, proximity)
 last_heartbeat_times = {}  # (label, direction) -> last_alert_time
 
-# Try opening external USB camera (usually index 1) first, fallback to integrated camera (index 0)
-cap = cv2.VideoCapture(1)
-if not cap.isOpened():
-    print("USB Camera (Index 1) not found or busy. Falling back to Integrated Camera (Index 0).")
-    cap = cv2.VideoCapture(0)
+# Scan for all active camera indices (tests 0 to 4) using DirectShow (Windows optimized)
+def get_best_camera_index():
+    working_indices = []
+    for i in range(5):
+        # cv2.CAP_DSHOW prevents long timeouts on empty indices in Windows
+        temp_cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+        if temp_cap.isOpened():
+            ret, frame = temp_cap.read()
+            if ret:
+                working_indices.append(i)
+            temp_cap.release()
+    
+    if not working_indices:
+        print("No active cameras detected. Defaulting to index 0.")
+        return 0
+        
+    print(f"Detected working camera indices: {working_indices}")
+    # The external USB camera is registered after the integrated webcam, so it has the highest index
+    selected_index = working_indices[-1]
+    print(f"Selected Camera Index {selected_index} (highest index preferred for external USB).")
+    return selected_index
+
+camera_index = get_best_camera_index()
+cap = cv2.VideoCapture(camera_index)
 
 # Track inference rate (1 detection run per second)
 last_inference_time = 0
