@@ -85,6 +85,7 @@ Detailed tasks can be tracked in [next_steps.md](file:///e:/Downloads/SEM%207/Co
 *   [x] **Concurrency Run Loop Fix** (fixes overlapping speech engine clashing)
 *   [x] **Auditory Pulse Warning Frequency** (varying alert rate by proximity)
 *   [x] **Real-World Distance Estimation** (calibrating pixel-widths to estimate physical meters)
+*   [x] **State Tracking & Change Detection** (announced only on new/changed alerts)
 
 ---
 

@@ -36,13 +36,14 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 - **Status:** **Completed** 🟢
 - **Details:** Replaced the static 3-second alert cooldown with a dynamic alert frequency. The rate scales dynamically based on the closest hazard's proximity (1.0s for `very close`, 2.5s for `moderately close`, and 4.0s for `far` objects), mimicking an auditory radar.
 
+### 7. 👁️ State Tracking & Change Detection (Stop Repetitive Alerts)
+- **Goal:** Stop repeating the same warnings if the environment hasn't changed.
+- **Status:** **Completed** 🟢
+- **Details:** Created an active-hazard tracking state machine. The system only announces new hazards, hazards that get closer, or critical "very close" hazards at a slow, non-intrusive heartbeat interval (6 seconds).
+
 ---
 
 ## 🏃 Upcoming Tasks (Next Steps)
-
-### 7. 👁️ State Tracking & Change Detection (Stop Repetitive Alerts)
-- **Goal:** Stop repeating the same warnings if the environment hasn't changed.
-- **Description:** Implement an object tracking state machine. Only speak warnings when a new obstacle appears, disappears, or changes its danger level (e.g., moves from "far" to "very close"), keeping the system clean and silent otherwise.
 
 ### 8. 🧠 Conversational Jarvis LLM Integration
 - **Goal:** Feed detections into a Large Language Model (local via Ollama, or online via Gemini API) to generate natural, human-like guidance.

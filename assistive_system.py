@@ -49,6 +49,10 @@ def speak(text):
 last_speech_time = 0 
 speech_cooldown = 3.0  # Speak warnings at most every 3 seconds
 
+# Global state tracking for active hazards and heartbeat alerts
+active_hazards = {}        # (label, direction) -> (last_seen_time, proximity)
+last_heartbeat_times = {}  # (label, direction) -> last_alert_time
+
 cap = cv2.VideoCapture(0)
 
 # Track inference rate (1 detection run per second)
@@ -70,6 +74,7 @@ while True:
         results = model(frame, stream=False, verbose=False) # verbose=False cleans up console output
         latest_detections = []
         obstacles_detected = []
+        current_seen_keys = set()
 
         for result in results:
             for box in result.boxes:
@@ -113,20 +118,60 @@ while True:
                     else:
                         proximity = "far"
 
-                    # Save detection for drawing and speaking
+                    # Save detection for drawing
                     latest_detections.append((x1, y1, x2, y2, label, proximity, direction, estimated_distance))
-                    obstacles_detected.append({
-                        'text': f"{label} {direction}, {proximity}",
-                        'estimated_distance': estimated_distance,
-                        'proximity': proximity
-                    })
+
+                    # State machine tracking logic
+                    hazard_key = (label, direction)
+                    current_seen_keys.add(hazard_key)
+
+                    is_new = hazard_key not in active_hazards
+                    proximity_got_closer = False
+                    is_heartbeat = False
+
+                    if not is_new:
+                        _, old_proximity = active_hazards[hazard_key]
+                        proximity_levels = {"very close": 0, "moderately close": 1, "far": 2}
+                        if proximity_levels[proximity] < proximity_levels[old_proximity]:
+                            proximity_got_closer = True
+                        
+                        # Trigger alert for very close items if heartbeat interval has passed
+                        if proximity == "very close":
+                            last_hb = last_heartbeat_times.get(hazard_key, 0)
+                            if current_time - last_hb > 6.0:  # 6 seconds reminder heartbeat
+                                is_heartbeat = True
+
+                    # Update the state of the active hazard
+                    active_hazards[hazard_key] = (current_time, proximity)
+
+                    # Only queue speech warning if it's a new threat, got closer, or hit the heartbeat reminder
+                    if is_new or proximity_got_closer or is_heartbeat:
+                        obstacles_detected.append({
+                            'text': f"{label} {direction}, {proximity}",
+                            'estimated_distance': estimated_distance,
+                            'proximity': proximity
+                        })
+                        last_heartbeat_times[hazard_key] = current_time
 
         last_inference_time = current_time
+
+        # Stale hazard cleanup: remove objects that haven't been seen in the last 2 seconds
+        stale_keys = []
+        for key in list(active_hazards.keys()):
+            if key not in current_seen_keys:
+                last_seen_time, _ = active_hazards[key]
+                if current_time - last_seen_time > 2.0:
+                    stale_keys.append(key)
+
+        for key in stale_keys:
+            del active_hazards[key]
+            if key in last_heartbeat_times:
+                del last_heartbeat_times[key]
 
         # Sort obstacles by estimated_distance ascending (closest first)
         obstacles_detected.sort(key=lambda x: x['estimated_distance'])
 
-        # 2. Speak warnings if any are detected (already handled by dynamic cooldown)
+        # 2. Speak warnings if any are detected (already filtered by state machine)
         if obstacles_detected:
             closest_obstacle = obstacles_detected[0]
             proximity = closest_obstacle['proximity']
