@@ -21,18 +21,23 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 - **Status:** **Completed** 🟢
 - **Details:** Displays a red arrow for `very close` items and orange/yellow for others, along with a warning dashboard overlay at the bottom.
 
+### 4. 🧵 Concurrency Run Loop Fix (Speech Engine)
+- **Goal:** Fix the `Speech error: run loop already started` bug.
+- **Status:** **Completed** 🟢
+- **Details:** Implemented a thread-safe message queue (`queue.Queue`) and a single dedicated daemon background thread worker to serialize all text-to-speech requests, avoiding concurrent engine runs.
+
+### 6. 📏 Real-World Distance Estimation (Meters)
+- **Goal:** Calculate actual distance in meters instead of relative width categories.
+- **Status:** **Completed** 🟢
+- **Details:** Calibrated average physical widths of objects (e.g. 8cm for a bottle, 45cm for a person) to calculate an estimated distance using `real_width / width_ratio`. This correctly prioritizes physically smaller close objects (like a bottle) over physically larger, further objects (like a person).
+
+### 5. 🔊 Auditory Pulse Warning Frequency
+- **Goal:** Vary warning frequency dynamically based on distance.
+- **Status:** **Completed** 🟢
+- **Details:** Replaced the static 3-second alert cooldown with a dynamic alert frequency. The rate scales dynamically based on the closest hazard's proximity (1.0s for `very close`, 2.5s for `moderately close`, and 4.0s for `far` objects), mimicking an auditory radar.
+
 ---
 
 ## 🏃 Upcoming Tasks (Next Steps)
 
-### 4. 🧵 Concurrency Run Loop Fix (Speech Engine)
-- **Goal:** Fix the `Speech error: run loop already started` bug.
-- **Description:** Implement a robust queue or mutex lock for the text-to-speech engine to prevent overlapping speech threads from clashing during active detection frames.
-
-### 5. 🔊 Auditory Pulse Warning Frequency
-- **Goal:** Vary warning frequency dynamically based on distance.
-- **Description:** Speed up the warning repetition rate (cooldown) if an object is `very close` (e.g., every 1 second) vs. `far` (e.g., every 4 seconds) to create an intuitive audio radar.
-
-### 6. 📏 Real-World Distance Estimation (Meters)
-- **Goal:** Calculate actual distance in meters instead of relative width categories.
-- **Description:** Calibrate standard object widths (e.g., average human, chair, bottle) and map focal length/pixel ratios to announce exact distances (e.g., `"Person at 12 o'clock, 1.5 meters away"`).
+*All core goals on the initial project roadmap have been successfully implemented!* 🎉

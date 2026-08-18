@@ -4,23 +4,45 @@ import pyttsx3
 import time
 import threading
 
+import queue
+
 # Initialize YOLO model
 model = YOLO('yolov8n.pt')
 
-# Threaded speak function to prevent freezing
-def speak(text):
-    def _run_speech():
-        try:
-            # Initialize engine inside the thread to avoid Windows COM thread issues
-            th_engine = pyttsx3.init()
-            th_engine.setProperty('rate', 170)  # slightly faster speech
-            th_engine.say(text)
-            th_engine.runAndWait()
-        except Exception as e:
-            print(f"Speech error: {e}")
+# Thread-safe queue for speech requests
+speech_queue = queue.Queue()
 
-    # Start speech in a daemon background thread
-    threading.Thread(target=_run_speech, daemon=True).start()
+# Speech worker running in a single dedicated background thread
+def speech_worker():
+    while True:
+        try:
+            # Block until a speech request is available
+            text = speech_queue.get()
+            # Initialize fresh engine inside the loop to avoid Windows COM thread resource issues
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 170)  # slightly faster speech
+            engine.say(text)
+            engine.runAndWait()
+            # Clean up reference
+            del engine
+            speech_queue.task_done()
+        except Exception as e:
+            print(f"Speech worker error: {e}")
+
+# Start the speech worker thread immediately
+threading.Thread(target=speech_worker, daemon=True).start()
+
+
+# Threaded speak function to prevent freezing and ensure message queuing
+def speak(text):
+    # Clear any pending speech tasks so we only announce the most recent hazard
+    while not speech_queue.empty():
+        try:
+            speech_queue.get_nowait()
+            speech_queue.task_done()
+        except queue.Empty:
+            break
+    speech_queue.put(text)
 
 
 # Track the last time a warning was spoken to avoid overlapping audio
@@ -65,37 +87,66 @@ while True:
                         hour_val -= 12
                     direction = f"at {hour_val} o'clock"
 
-                    # Distance mapping
+                    # Distance mapping using estimated physical width (meters)
+                    ESTIMATED_REAL_WIDTHS = {
+                        'person': 0.45,
+                        'chair': 0.50,
+                        'bottle': 0.08,
+                        'cup': 0.08,
+                        'backpack': 0.35,
+                        'handbag': 0.30,
+                        'suitcase': 0.40,
+                        'laptop': 0.35,
+                        'cell phone': 0.08
+                    }
+                    real_width = ESTIMATED_REAL_WIDTHS.get(label, 0.30)
+                    
                     obj_width = x2 - x1
-                    width_ratio = obj_width / width
-                    if width_ratio > 0.4:
+                    width_ratio = max(0.001, obj_width / width)
+                    estimated_distance = real_width / width_ratio
+
+                    # Determine proximity category based on estimated distance
+                    if estimated_distance < 1.0:
                         proximity = "very close"
-                    elif width_ratio > 0.2:
+                    elif estimated_distance < 2.0:
                         proximity = "moderately close"
                     else:
                         proximity = "far"
 
                     # Save detection for drawing and speaking
-                    latest_detections.append((x1, y1, x2, y2, label, proximity, direction, width_ratio))
+                    latest_detections.append((x1, y1, x2, y2, label, proximity, direction, estimated_distance))
                     obstacles_detected.append({
                         'text': f"{label} {direction}, {proximity}",
-                        'width_ratio': width_ratio
+                        'estimated_distance': estimated_distance,
+                        'proximity': proximity
                     })
 
         last_inference_time = current_time
 
-        # Sort obstacles by proximity (width_ratio descending = closest first)
-        obstacles_detected.sort(key=lambda x: x['width_ratio'], reverse=True)
+        # Sort obstacles by estimated_distance ascending (closest first)
+        obstacles_detected.sort(key=lambda x: x['estimated_distance'])
 
-        # 2. Speak warnings if any are detected (already handled by cooldown)
-        if obstacles_detected and (current_time - last_speech_time > speech_cooldown):
-            warning_msg = obstacles_detected[0]['text']
-            print(f"Alert: {warning_msg}")
-            speak(warning_msg)
-            last_speech_time = current_time
+        # 2. Speak warnings if any are detected (already handled by dynamic cooldown)
+        if obstacles_detected:
+            closest_obstacle = obstacles_detected[0]
+            proximity = closest_obstacle['proximity']
+            
+            # Dynamic cooldown: faster pulses for closer threats
+            if proximity == "very close":
+                dynamic_cooldown = 1.0
+            elif proximity == "moderately close":
+                dynamic_cooldown = 2.5
+            else:
+                dynamic_cooldown = 4.0
+                
+            if current_time - last_speech_time > dynamic_cooldown:
+                warning_msg = closest_obstacle['text']
+                print(f"Alert: {warning_msg} (Cooldown: {dynamic_cooldown}s)")
+                speak(warning_msg)
+                last_speech_time = current_time
 
     # 3. Draw the LATEST detections on the live frame (keeps visuals smooth)
-    for x1, y1, x2, y2, label, proximity, direction, w_ratio in latest_detections:
+    for x1, y1, x2, y2, label, proximity, direction, est_dist in latest_detections:
         color = (0, 0, 255) if proximity == "very close" else (0, 255, 0)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         cv2.putText(frame, f"{label} ({direction}, {proximity})", (x1, y1 - 10),
@@ -103,9 +154,9 @@ while True:
 
     # 4. Draw direction arrow pointing to the nearest hazard
     if latest_detections:
-        # Find closest detection based on width_ratio
-        closest = max(latest_detections, key=lambda x: x[7])
-        x1, y1, x2, y2, label, proximity, direction, w_ratio = closest
+        # Find closest detection based on estimated_distance (index 7)
+        closest = min(latest_detections, key=lambda x: x[7])
+        x1, y1, x2, y2, label, proximity, direction, est_dist = closest
         cx = (x1 + x2) // 2
         cy = (y1 + y2) // 2
         
