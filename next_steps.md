@@ -44,7 +44,7 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 ### 8. 📊 Metrics Instrumentation (Latency, TTS reliability, FPS)
 - **Goal:** Add lightweight logging to measure end-to-end alert latency, TTS failure/overlap rate, and display FPS, so future changes can be verified with before/after numbers.
 - **Status:** **Completed** 🟢
-- **Details:** See `metrics_plan.md` for methodology. Logs written as CSVs under `logs/`.
+- **Details:** See `metrics_plan.md` for methodology. Logs written as CSVs under `logs/`. Summarize a run (or compare two runs before/after a change) with `python analyze_metrics.py [--log-dir logs] [--compare other_logs_dir] [--json]`.
 
 ---
 
