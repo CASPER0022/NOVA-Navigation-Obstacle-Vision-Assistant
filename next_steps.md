@@ -46,6 +46,11 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 - **Status:** **Completed** 🟢
 - **Details:** See `metrics_plan.md` for methodology. Logs written as CSVs under `logs/`. Summarize a run (or compare two runs before/after a change) with `python analyze_metrics.py [--log-dir logs] [--compare other_logs_dir] [--json]`.
 
+### 9. 🎬 Recorded Video / Image Input Mode
+- **Goal:** Run the pipeline against a saved video file or a folder of still images instead of only a live webcam, so demos and regression tests don't require hardware.
+- **Status:** **Completed** 🟢
+- **Details:** `--input <path>` accepts either a video file (handled by `cv2.VideoCapture`) or a directory of images (via a small `ImageDirectoryCapture` shim with the same `read()`/`release()` interface, so the detection loop is unchanged). `--headless` skips `cv2.imshow`/`waitKey` for automated runs. Fixed a pre-existing shutdown race while adding this: the speech worker thread could still be writing to the metrics CSVs after `metrics.close()` ran on a short clip — the main loop now calls `speech_queue.join()` (and the worker now always calls `task_done()`, including on error) before closing the log files.
+
 ---
 
 ## 🏃 Upcoming Tasks (Next Steps)
