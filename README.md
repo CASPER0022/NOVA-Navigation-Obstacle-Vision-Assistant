@@ -73,6 +73,13 @@ Execute the main assistant script:
 python assistive_system.py
 ```
 *   Press **`q`** on the video window to quit.
+*   Wrong camera selected? Override it: `python assistive_system.py --camera 0` (or the legacy positional form `python assistive_system.py 0`).
+
+**Run against a recorded video or image folder instead of a live camera** — useful for demos and for regression-testing changes without needing a webcam:
+```bash
+python assistive_system.py --input path/to/clip.mp4
+python assistive_system.py --input path/to/frames_dir --headless   # no GUI window, e.g. for CI/automated runs
+```
 
 Each run writes latency/TTS/FPS logs to `logs/`. Summarize them with:
 ```bash
@@ -92,6 +99,8 @@ Detailed tasks can be tracked in [next_steps.md](file:///e:/Downloads/SEM%207/Co
 *   [x] **Auditory Pulse Warning Frequency** (varying alert rate by proximity)
 *   [x] **Real-World Distance Estimation** (calibrating pixel-widths to estimate physical meters)
 *   [x] **State Tracking & Change Detection** (announced only on new/changed alerts)
+*   [x] **Metrics Instrumentation** (alert latency, TTS reliability, FPS logging + `analyze_metrics.py`)
+*   [x] **Recorded Video / Image Input Mode** (`--input`, `--headless`) for demos and regression testing without a webcam
 
 ---
 
