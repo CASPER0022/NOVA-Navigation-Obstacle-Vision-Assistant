@@ -5,9 +5,14 @@ import time
 import threading
 import queue
 import sys
+from collections import deque
+
+from metrics_logger import MetricsLogger
 
 # Initialize YOLO model
 model = YOLO('yolov8n.pt')
+
+metrics = MetricsLogger()
 
 # Thread-safe queue for speech requests
 speech_queue = queue.Queue()
@@ -18,6 +23,7 @@ def speech_worker():
         try:
             # Block until a speech request is available
             text = speech_queue.get()
+            metrics.log_tts_event("attempt", text)
             # Initialize fresh engine inside the loop to avoid Windows COM thread resource issues
             engine = pyttsx3.init()
             engine.setProperty('rate', 170)  # slightly faster speech
@@ -25,9 +31,11 @@ def speech_worker():
             engine.runAndWait()
             # Clean up reference
             del engine
+            metrics.log_tts_event("success", text)
             speech_queue.task_done()
         except Exception as e:
             print(f"Speech worker error: {e}")
+            metrics.log_tts_event("error", str(e))
 
 # Start the speech worker thread immediately
 threading.Thread(target=speech_worker, daemon=True).start()
@@ -46,12 +54,13 @@ def speak(text):
 
 
 # Track the last time a warning was spoken to avoid overlapping audio
-last_speech_time = 0 
+last_speech_time = 0
 speech_cooldown = 3.0  # Speak warnings at most every 3 seconds
 
 # Global state tracking for active hazards and heartbeat alerts
 active_hazards = {}        # (label, direction) -> (last_seen_time, proximity)
 last_heartbeat_times = {}  # (label, direction) -> last_alert_time
+first_seen_ts = {}         # (label, direction) -> time first detected, for alert-latency metrics
 
 # Scan for all active camera indices (tests 0 to 4) using DirectShow (Windows optimized)
 def get_best_camera_index():
@@ -64,11 +73,11 @@ def get_best_camera_index():
             if ret:
                 working_indices.append(i)
             temp_cap.release()
-    
+
     if not working_indices:
         print("No active cameras detected. Defaulting to index 0.")
         return 0
-        
+
     print(f"Detected working camera indices: {working_indices}")
     selected_index = working_indices[-1]
     print(f"Auto-selected Camera Index {selected_index} (highest index).")
@@ -95,8 +104,13 @@ cap = cv2.VideoCapture(camera_index)
 # Track inference rate (1 detection run per second)
 last_inference_time = 0
 inference_interval = 1.0  # seconds
+last_inference_duration = 0.0
 # Store the latest bounding boxes to draw between runs
 latest_detections = []
+
+# Rolling frame-time window for FPS measurement
+frame_times = deque(maxlen=60)
+last_fps_log_time = 0.0
 
 while True:
     ret, frame = cap.read()
@@ -105,10 +119,22 @@ while True:
 
     height, width, _ = frame.shape
     current_time = time.time()
-    
+
+    # Track effective display FPS, independent of the once-per-second inference cadence
+    frame_times.append(current_time)
+    if len(frame_times) >= 2:
+        fps = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0])
+        cv2.putText(frame, f"FPS: {fps:.1f}", (width - 120, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        if current_time - last_fps_log_time >= 1.0:
+            metrics.log_fps_sample(fps)
+            last_fps_log_time = current_time
+
     # 1. Run inference ONLY if 1 second has passed
     if current_time - last_inference_time >= inference_interval:
+        inference_start = time.time()
         results = model(frame, stream=False, verbose=False) # verbose=False cleans up console output
+        last_inference_duration = time.time() - inference_start
         latest_detections = []
         obstacles_detected = []
         current_seen_keys = set()
@@ -117,11 +143,11 @@ while True:
             for box in result.boxes:
                 class_id = int(box.cls[0])
                 label = model.names[class_id]
-                
+
                 if class_id in [0, 1, 2, 39, 56, 62, 63]:
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     obj_center_x = (x1 + x2) // 2
-                    
+
                     # Clock-Position mapping (9 o'clock to 3 o'clock)
                     x_norm = obj_center_x / width
                     hour_val = round(9 + x_norm * 6)
@@ -142,7 +168,7 @@ while True:
                         'cell phone': 0.08
                     }
                     real_width = ESTIMATED_REAL_WIDTHS.get(label, 0.30)
-                    
+
                     obj_width = x2 - x1
                     width_ratio = max(0.001, obj_width / width)
                     estimated_distance = real_width / width_ratio
@@ -166,12 +192,15 @@ while True:
                     proximity_got_closer = False
                     is_heartbeat = False
 
+                    if is_new:
+                        first_seen_ts[hazard_key] = current_time
+
                     if not is_new:
                         _, old_proximity = active_hazards[hazard_key]
                         proximity_levels = {"very close": 0, "moderately close": 1, "far": 2}
                         if proximity_levels[proximity] < proximity_levels[old_proximity]:
                             proximity_got_closer = True
-                        
+
                         # Trigger alert for very close items if heartbeat interval has passed
                         if proximity == "very close":
                             last_hb = last_heartbeat_times.get(hazard_key, 0)
@@ -186,7 +215,8 @@ while True:
                         obstacles_detected.append({
                             'text': f"{label} {direction}, {proximity}",
                             'estimated_distance': estimated_distance,
-                            'proximity': proximity
+                            'proximity': proximity,
+                            'hazard_key': hazard_key
                         })
                         last_heartbeat_times[hazard_key] = current_time
 
@@ -204,6 +234,8 @@ while True:
             del active_hazards[key]
             if key in last_heartbeat_times:
                 del last_heartbeat_times[key]
+            if key in first_seen_ts:
+                del first_seen_ts[key]
 
         # Sort obstacles by estimated_distance ascending (closest first)
         obstacles_detected.sort(key=lambda x: x['estimated_distance'])
@@ -212,7 +244,7 @@ while True:
         if obstacles_detected:
             closest_obstacle = obstacles_detected[0]
             proximity = closest_obstacle['proximity']
-            
+
             # Dynamic cooldown: faster pulses for closer threats
             if proximity == "very close":
                 dynamic_cooldown = 1.0
@@ -220,11 +252,14 @@ while True:
                 dynamic_cooldown = 2.5
             else:
                 dynamic_cooldown = 4.0
-                
+
             if current_time - last_speech_time > dynamic_cooldown:
                 warning_msg = closest_obstacle['text']
                 print(f"Alert: {warning_msg} (Cooldown: {dynamic_cooldown}s)")
                 speak(warning_msg)
+                speak_ts = time.time()
+                detect_ts = first_seen_ts.get(closest_obstacle['hazard_key'], current_time)
+                metrics.log_alert_latency(closest_obstacle['hazard_key'][0], detect_ts, speak_ts, last_inference_duration)
                 last_speech_time = current_time
 
     # 3. Draw the LATEST detections on the live frame (keeps visuals smooth)
@@ -241,15 +276,15 @@ while True:
         x1, y1, x2, y2, label, proximity, direction, est_dist = closest
         cx = (x1 + x2) // 2
         cy = (y1 + y2) // 2
-        
+
         start_pt = (width // 2, height - 40)
         end_pt = (cx, cy)
-        
+
         # Color based on proximity
         arrow_color = (0, 0, 255) if proximity == "very close" else (0, 165, 255)
         cv2.arrowedLine(frame, start_pt, end_pt, arrow_color, 3, tipLength=0.15)
         cv2.circle(frame, start_pt, 6, (255, 0, 0), -1)
-        
+
         # Overlay warning text at the bottom
         cv2.putText(frame, f"HAZARD: {label.upper()} ({direction})", (20, height - 15),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, arrow_color, 2)
@@ -281,3 +316,4 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
+metrics.close()

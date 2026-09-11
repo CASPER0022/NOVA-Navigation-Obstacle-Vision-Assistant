@@ -26,34 +26,39 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 - **Status:** **Completed** 🟢
 - **Details:** Implemented a thread-safe message queue (`queue.Queue`) and a single dedicated daemon background thread worker to serialize all text-to-speech requests, avoiding concurrent engine runs.
 
-### 6. 📏 Real-World Distance Estimation (Meters)
-- **Goal:** Calculate actual distance in meters instead of relative width categories.
-- **Status:** **Completed** 🟢
-- **Details:** Calibrated average physical widths of objects (e.g. 8cm for a bottle, 45cm for a person) to calculate an estimated distance using `real_width / width_ratio`. This correctly prioritizes physically smaller close objects (like a bottle) over physically larger, further objects (like a person).
-
 ### 5. 🔊 Auditory Pulse Warning Frequency
 - **Goal:** Vary warning frequency dynamically based on distance.
 - **Status:** **Completed** 🟢
 - **Details:** Replaced the static 3-second alert cooldown with a dynamic alert frequency. The rate scales dynamically based on the closest hazard's proximity (1.0s for `very close`, 2.5s for `moderately close`, and 4.0s for `far` objects), mimicking an auditory radar.
+
+### 6. 📏 Real-World Distance Estimation (Meters)
+- **Goal:** Calculate actual distance in meters instead of relative width categories.
+- **Status:** **Completed** 🟢
+- **Details:** Calibrated average physical widths of objects (e.g. 8cm for a bottle, 45cm for a person) to calculate an estimated distance using `real_width / width_ratio`. This correctly prioritizes physically smaller close objects (like a bottle) over physically larger, further objects (like a person).
 
 ### 7. 👁️ State Tracking & Change Detection (Stop Repetitive Alerts)
 - **Goal:** Stop repeating the same warnings if the environment hasn't changed.
 - **Status:** **Completed** 🟢
 - **Details:** Created an active-hazard tracking state machine. The system only announces new hazards, hazards that get closer, or critical "very close" hazards at a slow, non-intrusive heartbeat interval (6 seconds).
 
+### 8. 📊 Metrics Instrumentation (Latency, TTS reliability, FPS)
+- **Goal:** Add lightweight logging to measure end-to-end alert latency, TTS failure/overlap rate, and display FPS, so future changes can be verified with before/after numbers.
+- **Status:** **Completed** 🟢
+- **Details:** See `metrics_plan.md` for methodology. Logs written as CSVs under `logs/`.
+
 ---
 
 ## 🏃 Upcoming Tasks (Next Steps)
 
-### 8. 🧠 Conversational Jarvis LLM Integration
+### 9. 🧠 Conversational Jarvis LLM Integration
 - **Goal:** Feed detections into a Large Language Model (local via Ollama, or online via Gemini API) to generate natural, human-like guidance.
 - **Description:** Send structured obstacle coordinates to the model and instruct it to roleplay as an assistant. Instead of *"bottle 12 o'clock very close"*, it will say: *"Careful, there is a water bottle right in front of you. There is also a chair to your right if you want to rest."*
 
-### 9. 🎙️ Interactive Voice Queries & Wake Word ("Hey Jarvis")
+### 10. 🎙️ Interactive Voice Queries & Wake Word ("Hey Jarvis")
 - **Goal:** Allow the user to ask the system questions.
 - **Description:** Implement an offline speech-to-text (STT) listener. The user can say *"Hey Jarvis, is the path clear?"* or *"Where is my coffee cup?"*, and the system checks the YOLO coordinates to answer dynamically.
 
-### 10. 🗣️ High-Fidelity Neural TTS
+### 11. 🗣️ High-Fidelity Neural TTS
 - **Goal:** Upgrade the robotic speech voice to a premium, natural human voice.
 - **Description:** Switch from basic offline `pyttsx3` to a neural voice synthesizer (like `edge-tts` or ElevenLabs). Choose a British male voice profile (like `en-GB-RyanNeural`) for that premium, conversational Jarvis aesthetic.
 
