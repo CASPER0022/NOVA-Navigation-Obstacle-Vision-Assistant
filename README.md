@@ -74,6 +74,12 @@ python assistive_system.py
 ```
 *   Press **`q`** on the video window to quit.
 
+Each run writes latency/TTS/FPS logs to `logs/`. Summarize them with:
+```bash
+python analyze_metrics.py                                  # report for logs/
+python analyze_metrics.py --compare logs_after_fix          # compare two runs
+```
+
 ---
 
 ## 📅 Roadmap & Next Steps
