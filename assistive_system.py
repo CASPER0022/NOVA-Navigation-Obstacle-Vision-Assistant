@@ -3,6 +3,8 @@ from ultralytics import YOLO
 import pyttsx3
 import time
 import threading
+import queue
+import sys
 from collections import deque
 
 from metrics_logger import MetricsLogger
@@ -12,44 +14,99 @@ model = YOLO('yolov8n.pt')
 
 metrics = MetricsLogger()
 
-# Threaded speak function to prevent freezing
-def speak(text):
-    metrics.log_tts_event("attempt", text)
+# Thread-safe queue for speech requests
+speech_queue = queue.Queue()
 
-    def _run_speech():
+# Speech worker running in a single dedicated background thread
+def speech_worker():
+    while True:
         try:
-            # Initialize engine inside the thread to avoid Windows COM thread issues
-            th_engine = pyttsx3.init()
-            th_engine.setProperty('rate', 170)  # slightly faster speech
-            th_engine.say(text)
-            th_engine.runAndWait()
+            # Block until a speech request is available
+            text = speech_queue.get()
+            metrics.log_tts_event("attempt", text)
+            # Initialize fresh engine inside the loop to avoid Windows COM thread resource issues
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 170)  # slightly faster speech
+            engine.say(text)
+            engine.runAndWait()
+            # Clean up reference
+            del engine
             metrics.log_tts_event("success", text)
+            speech_queue.task_done()
         except Exception as e:
-            print(f"Speech error: {e}")
+            print(f"Speech worker error: {e}")
             metrics.log_tts_event("error", str(e))
 
-    # Start speech in a daemon background thread
-    threading.Thread(target=_run_speech, daemon=True).start()
+# Start the speech worker thread immediately
+threading.Thread(target=speech_worker, daemon=True).start()
+
+
+# Threaded speak function to prevent freezing and ensure message queuing
+def speak(text):
+    # Clear any pending speech tasks so we only announce the most recent hazard
+    while not speech_queue.empty():
+        try:
+            speech_queue.get_nowait()
+            speech_queue.task_done()
+        except queue.Empty:
+            break
+    speech_queue.put(text)
 
 
 # Track the last time a warning was spoken to avoid overlapping audio
-last_speech_time = 0 
+last_speech_time = 0
 speech_cooldown = 3.0  # Speak warnings at most every 3 seconds
 
-cap = cv2.VideoCapture(0)
+# Global state tracking for active hazards and heartbeat alerts
+active_hazards = {}        # (label, direction) -> (last_seen_time, proximity)
+last_heartbeat_times = {}  # (label, direction) -> last_alert_time
+first_seen_ts = {}         # (label, direction) -> time first detected, for alert-latency metrics
+
+# Scan for all active camera indices (tests 0 to 4) using DirectShow (Windows optimized)
+def get_best_camera_index():
+    working_indices = []
+    for i in range(5):
+        # cv2.CAP_DSHOW prevents long timeouts on empty indices in Windows
+        temp_cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+        if temp_cap.isOpened():
+            ret, frame = temp_cap.read()
+            if ret:
+                working_indices.append(i)
+            temp_cap.release()
+
+    if not working_indices:
+        print("No active cameras detected. Defaulting to index 0.")
+        return 0
+
+    print(f"Detected working camera indices: {working_indices}")
+    selected_index = working_indices[-1]
+    print(f"Auto-selected Camera Index {selected_index} (highest index).")
+    return selected_index
+
+# Allow manual override via command line parameter: python .\assistive_system.py <index>
+if len(sys.argv) > 1:
+    try:
+        camera_index = int(sys.argv[1])
+        print(f"Using manually specified Camera Index: {camera_index}")
+    except ValueError:
+        print("Invalid index format. Running auto-scan...")
+        camera_index = get_best_camera_index()
+else:
+    print("----------------------------------------------------------------")
+    print("Tip: If the system uses the wrong camera, override it by running:")
+    print("     python .\\assistive_system.py <index>")
+    print("     Example: python .\\assistive_system.py 0   (to use index 0)")
+    print("----------------------------------------------------------------")
+    camera_index = get_best_camera_index()
+
+cap = cv2.VideoCapture(camera_index)
 
 # Track inference rate (1 detection run per second)
 last_inference_time = 0
 inference_interval = 1.0  # seconds
+last_inference_duration = 0.0
 # Store the latest bounding boxes to draw between runs
 latest_detections = []
-
-# Track when each obstacle label was first seen, to measure alert latency
-first_seen_ts = {}
-# Labels already logged (so repeat cooldown-throttled warnings for a still-present
-# object don't re-log ever-growing "latency" against the original first-seen time)
-latency_logged_labels = set()
-last_inference_duration = 0.0
 
 # Rolling frame-time window for FPS measurement
 frame_times = deque(maxlen=60)
@@ -63,6 +120,7 @@ while True:
     height, width, _ = frame.shape
     current_time = time.time()
 
+    # Track effective display FPS, independent of the once-per-second inference cadence
     frame_times.append(current_time)
     if len(frame_times) >= 2:
         fps = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0])
@@ -79,17 +137,17 @@ while True:
         last_inference_duration = time.time() - inference_start
         latest_detections = []
         obstacles_detected = []
-        seen_labels_this_cycle = set()
+        current_seen_keys = set()
 
         for result in results:
             for box in result.boxes:
                 class_id = int(box.cls[0])
                 label = model.names[class_id]
-                
+
                 if class_id in [0, 1, 2, 39, 56, 62, 63]:
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     obj_center_x = (x1 + x2) // 2
-                    
+
                     # Clock-Position mapping (9 o'clock to 3 o'clock)
                     x_norm = obj_center_x / width
                     hour_val = round(9 + x_norm * 6)
@@ -97,56 +155,115 @@ while True:
                         hour_val -= 12
                     direction = f"at {hour_val} o'clock"
 
-                    # Distance mapping
+                    # Distance mapping using estimated physical width (meters)
+                    ESTIMATED_REAL_WIDTHS = {
+                        'person': 0.45,
+                        'chair': 0.50,
+                        'bottle': 0.08,
+                        'cup': 0.08,
+                        'backpack': 0.35,
+                        'handbag': 0.30,
+                        'suitcase': 0.40,
+                        'laptop': 0.35,
+                        'cell phone': 0.08
+                    }
+                    real_width = ESTIMATED_REAL_WIDTHS.get(label, 0.30)
+
                     obj_width = x2 - x1
-                    width_ratio = obj_width / width
-                    if width_ratio > 0.4:
+                    width_ratio = max(0.001, obj_width / width)
+                    estimated_distance = real_width / width_ratio
+
+                    # Determine proximity category based on estimated distance
+                    if estimated_distance < 1.0:
                         proximity = "very close"
-                    elif width_ratio > 0.2:
+                    elif estimated_distance < 2.0:
                         proximity = "moderately close"
                     else:
                         proximity = "far"
 
-                    # Save detection for drawing and speaking
-                    latest_detections.append((x1, y1, x2, y2, label, proximity, direction, width_ratio))
-                    obstacles_detected.append({
-                        'text': f"{label} {direction}, {proximity}",
-                        'width_ratio': width_ratio,
-                        'label': label
-                    })
+                    # Save detection for drawing
+                    latest_detections.append((x1, y1, x2, y2, label, proximity, direction, estimated_distance))
 
-                    seen_labels_this_cycle.add(label)
-                    if label not in first_seen_ts:
-                        first_seen_ts[label] = current_time
+                    # State machine tracking logic
+                    hazard_key = (label, direction)
+                    current_seen_keys.add(hazard_key)
 
-        # Drop labels that are no longer in frame so a future re-appearance
-        # is timed as a fresh detection, not stale latency.
-        for stale_label in list(first_seen_ts.keys()):
-            if stale_label not in seen_labels_this_cycle:
-                del first_seen_ts[stale_label]
-                latency_logged_labels.discard(stale_label)
+                    is_new = hazard_key not in active_hazards
+                    proximity_got_closer = False
+                    is_heartbeat = False
+
+                    if is_new:
+                        first_seen_ts[hazard_key] = current_time
+
+                    if not is_new:
+                        _, old_proximity = active_hazards[hazard_key]
+                        proximity_levels = {"very close": 0, "moderately close": 1, "far": 2}
+                        if proximity_levels[proximity] < proximity_levels[old_proximity]:
+                            proximity_got_closer = True
+
+                        # Trigger alert for very close items if heartbeat interval has passed
+                        if proximity == "very close":
+                            last_hb = last_heartbeat_times.get(hazard_key, 0)
+                            if current_time - last_hb > 6.0:  # 6 seconds reminder heartbeat
+                                is_heartbeat = True
+
+                    # Update the state of the active hazard
+                    active_hazards[hazard_key] = (current_time, proximity)
+
+                    # Only queue speech warning if it's a new threat, got closer, or hit the heartbeat reminder
+                    if is_new or proximity_got_closer or is_heartbeat:
+                        obstacles_detected.append({
+                            'text': f"{label} {direction}, {proximity}",
+                            'estimated_distance': estimated_distance,
+                            'proximity': proximity,
+                            'hazard_key': hazard_key
+                        })
+                        last_heartbeat_times[hazard_key] = current_time
 
         last_inference_time = current_time
 
-        # Sort obstacles by proximity (width_ratio descending = closest first)
-        obstacles_detected.sort(key=lambda x: x['width_ratio'], reverse=True)
+        # Stale hazard cleanup: remove objects that haven't been seen in the last 2 seconds
+        stale_keys = []
+        for key in list(active_hazards.keys()):
+            if key not in current_seen_keys:
+                last_seen_time, _ = active_hazards[key]
+                if current_time - last_seen_time > 2.0:
+                    stale_keys.append(key)
 
-        # 2. Speak warnings if any are detected (already handled by cooldown)
-        if obstacles_detected and (current_time - last_speech_time > speech_cooldown):
-            top_obstacle = obstacles_detected[0]
-            warning_msg = top_obstacle['text']
-            print(f"Alert: {warning_msg}")
-            speak(warning_msg)
-            speak_ts = time.time()
-            label = top_obstacle['label']
-            if label not in latency_logged_labels:
-                detect_ts = first_seen_ts.get(label, current_time)
-                metrics.log_alert_latency(label, detect_ts, speak_ts, last_inference_duration)
-                latency_logged_labels.add(label)
-            last_speech_time = current_time
+        for key in stale_keys:
+            del active_hazards[key]
+            if key in last_heartbeat_times:
+                del last_heartbeat_times[key]
+            if key in first_seen_ts:
+                del first_seen_ts[key]
+
+        # Sort obstacles by estimated_distance ascending (closest first)
+        obstacles_detected.sort(key=lambda x: x['estimated_distance'])
+
+        # 2. Speak warnings if any are detected (already filtered by state machine)
+        if obstacles_detected:
+            closest_obstacle = obstacles_detected[0]
+            proximity = closest_obstacle['proximity']
+
+            # Dynamic cooldown: faster pulses for closer threats
+            if proximity == "very close":
+                dynamic_cooldown = 1.0
+            elif proximity == "moderately close":
+                dynamic_cooldown = 2.5
+            else:
+                dynamic_cooldown = 4.0
+
+            if current_time - last_speech_time > dynamic_cooldown:
+                warning_msg = closest_obstacle['text']
+                print(f"Alert: {warning_msg} (Cooldown: {dynamic_cooldown}s)")
+                speak(warning_msg)
+                speak_ts = time.time()
+                detect_ts = first_seen_ts.get(closest_obstacle['hazard_key'], current_time)
+                metrics.log_alert_latency(closest_obstacle['hazard_key'][0], detect_ts, speak_ts, last_inference_duration)
+                last_speech_time = current_time
 
     # 3. Draw the LATEST detections on the live frame (keeps visuals smooth)
-    for x1, y1, x2, y2, label, proximity, direction, w_ratio in latest_detections:
+    for x1, y1, x2, y2, label, proximity, direction, est_dist in latest_detections:
         color = (0, 0, 255) if proximity == "very close" else (0, 255, 0)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         cv2.putText(frame, f"{label} ({direction}, {proximity})", (x1, y1 - 10),
@@ -154,20 +271,20 @@ while True:
 
     # 4. Draw direction arrow pointing to the nearest hazard
     if latest_detections:
-        # Find closest detection based on width_ratio
-        closest = max(latest_detections, key=lambda x: x[7])
-        x1, y1, x2, y2, label, proximity, direction, w_ratio = closest
+        # Find closest detection based on estimated_distance (index 7)
+        closest = min(latest_detections, key=lambda x: x[7])
+        x1, y1, x2, y2, label, proximity, direction, est_dist = closest
         cx = (x1 + x2) // 2
         cy = (y1 + y2) // 2
-        
+
         start_pt = (width // 2, height - 40)
         end_pt = (cx, cy)
-        
+
         # Color based on proximity
         arrow_color = (0, 0, 255) if proximity == "very close" else (0, 165, 255)
         cv2.arrowedLine(frame, start_pt, end_pt, arrow_color, 3, tipLength=0.15)
         cv2.circle(frame, start_pt, 6, (255, 0, 0), -1)
-        
+
         # Overlay warning text at the bottom
         cv2.putText(frame, f"HAZARD: {label.upper()} ({direction})", (20, height - 15),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, arrow_color, 2)
