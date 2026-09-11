@@ -1,10 +1,11 @@
+import argparse
 import cv2
 from ultralytics import YOLO
+import os
 import pyttsx3
 import time
 import threading
 import queue
-import sys
 from collections import deque
 
 from metrics_logger import MetricsLogger
@@ -20,9 +21,9 @@ speech_queue = queue.Queue()
 # Speech worker running in a single dedicated background thread
 def speech_worker():
     while True:
+        # Block until a speech request is available
+        text = speech_queue.get()
         try:
-            # Block until a speech request is available
-            text = speech_queue.get()
             metrics.log_tts_event("attempt", text)
             # Initialize fresh engine inside the loop to avoid Windows COM thread resource issues
             engine = pyttsx3.init()
@@ -32,10 +33,13 @@ def speech_worker():
             # Clean up reference
             del engine
             metrics.log_tts_event("success", text)
-            speech_queue.task_done()
         except Exception as e:
             print(f"Speech worker error: {e}")
             metrics.log_tts_event("error", str(e))
+        finally:
+            # Always mark the task done (even on error) so speech_queue.join() below
+            # can't hang, and so metrics.close() waits for in-flight logging to finish.
+            speech_queue.task_done()
 
 # Start the speech worker thread immediately
 threading.Thread(target=speech_worker, daemon=True).start()
@@ -83,23 +87,77 @@ def get_best_camera_index():
     print(f"Auto-selected Camera Index {selected_index} (highest index).")
     return selected_index
 
-# Allow manual override via command line parameter: python .\assistive_system.py <index>
-if len(sys.argv) > 1:
-    try:
-        camera_index = int(sys.argv[1])
-        print(f"Using manually specified Camera Index: {camera_index}")
-    except ValueError:
-        print("Invalid index format. Running auto-scan...")
-        camera_index = get_best_camera_index()
-else:
-    print("----------------------------------------------------------------")
-    print("Tip: If the system uses the wrong camera, override it by running:")
-    print("     python .\\assistive_system.py <index>")
-    print("     Example: python .\\assistive_system.py 0   (to use index 0)")
-    print("----------------------------------------------------------------")
-    camera_index = get_best_camera_index()
 
-cap = cv2.VideoCapture(camera_index)
+class ImageDirectoryCapture:
+    """Mimics cv2.VideoCapture's read()/release()/isOpened() interface over a
+    directory of still images, so --input can point at a folder of frames as
+    well as a video file without touching the main loop below."""
+
+    _EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp')
+
+    def __init__(self, dir_path):
+        self._paths = sorted(
+            os.path.join(dir_path, f) for f in os.listdir(dir_path)
+            if f.lower().endswith(self._EXTENSIONS)
+        )
+        self._index = 0
+
+    def isOpened(self):
+        return len(self._paths) > 0
+
+    def read(self):
+        if self._index >= len(self._paths):
+            return False, None
+        frame = cv2.imread(self._paths[self._index])
+        self._index += 1
+        return frame is not None, frame
+
+    def release(self):
+        pass
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="NOVA assistive navigation system")
+    parser.add_argument('camera_index', nargs='?', type=int, default=None,
+                         help='(legacy positional form) camera index, equivalent to --camera')
+    parser.add_argument('--camera', type=int, default=None,
+                         help='Manually specify the webcam index to use (skips auto-scan)')
+    parser.add_argument('--input', type=str, default=None,
+                         help='Path to a video file or a directory of images to run on '
+                              'instead of a live camera (e.g. for demos or regression tests)')
+    parser.add_argument('--headless', action='store_true',
+                         help='Do not open a GUI window (skips cv2.imshow/waitKey); '
+                              'use with --input for automated/offline runs')
+    return parser.parse_args()
+
+
+args = parse_args()
+
+if args.input:
+    if os.path.isdir(args.input):
+        print(f"Using image directory as input: {args.input}")
+        cap = ImageDirectoryCapture(args.input)
+    else:
+        print(f"Using video file as input: {args.input}")
+        cap = cv2.VideoCapture(args.input)
+    if not cap.isOpened():
+        print(f"Could not open input: {args.input}")
+        raise SystemExit(1)
+else:
+    # Allow manual override via command line parameter: python .\assistive_system.py <index>
+    manual_index = args.camera if args.camera is not None else args.camera_index
+    if manual_index is not None:
+        camera_index = manual_index
+        print(f"Using manually specified Camera Index: {camera_index}")
+    else:
+        print("----------------------------------------------------------------")
+        print("Tip: If the system uses the wrong camera, override it by running:")
+        print("     python .\\assistive_system.py <index>   (or --camera <index>)")
+        print("     Example: python .\\assistive_system.py 0   (to use index 0)")
+        print("     To run on a recorded video/image folder instead: --input <path>")
+        print("----------------------------------------------------------------")
+        camera_index = get_best_camera_index()
+    cap = cv2.VideoCapture(camera_index)
 
 # Track inference rate (1 detection run per second)
 last_inference_time = 0
@@ -310,10 +368,15 @@ while True:
         lx = int(width * pct)
         cv2.putText(frame, f"{label_str}H", (lx - 10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
-    cv2.imshow("Assistive System Feed", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    if not args.headless:
+        cv2.imshow("Assistive System Feed", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
 cap.release()
-cv2.destroyAllWindows()
+if not args.headless:
+    cv2.destroyAllWindows()
+# Wait for any in-flight speech (and its metrics logging) to finish before closing
+# the log files, so a run that ends right after an alert doesn't race the CSV writes.
+speech_queue.join()
 metrics.close()
