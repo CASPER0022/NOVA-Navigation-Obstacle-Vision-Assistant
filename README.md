@@ -39,6 +39,12 @@ The system coordinates three main modules to build a continuous, real-time feedb
 *   **Visual Vector HUD:** Draws a real-time vector arrow from the bottom center pointing directly to the nearest hazard, dynamically color-coded by threat level.
 *   **Non-Blocking TTS Warnings:** Uses background threads to speak warnings seamlessly without freezing the camera stream.
 *   **CPU Optimization:** Limits inference processing to once per second while keeping the display stream fluid.
+*   **Resilient Camera Handling:** Automatically detects a lost/disconnected camera, retries reconnecting, and announces status changes so the user is never left with unexplained silence.
+*   **"Path Clear" Heartbeat:** Periodically confirms aloud that the system is running and no hazards are present, distinguishing a quiet path from a frozen system.
+*   **Spoken Startup & Shutdown:** Announces `"System ready"` on launch and `"Shutting down"` on exit, so state changes are audible, not just visible in a console.
+*   **Accessible Quit (Ctrl+C):** Quitting no longer requires seeing or focusing the video window — `Ctrl+C` in the terminal works from anywhere and always triggers a spoken confirmation before exiting.
+*   **Urgency Earcons:** Plays a distinct instant tone per proximity tier (double-beep for `very close`, single tones for others) ahead of the spoken phrase, so reaction isn't gated on TTS generation time.
+*   **Preemptible Critical Alerts:** A `"very close"` hazard can interrupt speech that's already playing, so critical warnings are never queued behind less urgent ones.
 
 ---
 
@@ -72,19 +78,18 @@ Execute the main assistant script:
 ```bash
 python assistive_system.py
 ```
-*   Press **`q`** on the video window to quit.
-*   Wrong camera selected? Override it: `python assistive_system.py --camera 0` (or the legacy positional form `python assistive_system.py 0`).
+*   Press **`Ctrl+C`** in the terminal to quit (works from anywhere, no window focus needed) — or press **`q`** on the video window if it's focused.
+*   Wrong camera selected? Override it: `python assistive_system.py --camera 0` (or positional `python assistive_system.py 0`).
 
-**Run against a recorded video or image folder instead of a live camera** — useful for demos and for regression-testing changes without needing a webcam:
+**Run against a recorded video or image folder instead of a live camera:**
 ```bash
 python assistive_system.py --input path/to/clip.mp4
-python assistive_system.py --input path/to/frames_dir --headless   # no GUI window, e.g. for CI/automated runs
+python assistive_system.py --input path/to/frames_dir --headless   # no GUI window
 ```
 
 Each run writes latency/TTS/FPS logs to `logs/`. Summarize them with:
 ```bash
-python analyze_metrics.py                                  # report for logs/
-python analyze_metrics.py --compare logs_after_fix          # compare two runs
+python analyze_metrics.py
 ```
 
 ---
@@ -101,6 +106,12 @@ Detailed tasks can be tracked in [next_steps.md](file:///e:/Downloads/SEM%207/Co
 *   [x] **State Tracking & Change Detection** (announced only on new/changed alerts)
 *   [x] **Metrics Instrumentation** (alert latency, TTS reliability, FPS logging + `analyze_metrics.py`)
 *   [x] **Recorded Video / Image Input Mode** (`--input`, `--headless`) for demos and regression testing without a webcam
+*   [x] **Camera Reconnect & Failure Recovery** (auto-retries and announces status instead of dying silently)
+*   [x] **Audible "Path Clear" Heartbeat** (confirms the system is alive when no hazards are present)
+*   [x] **Spoken Startup Confirmation** (announces readiness instead of relying on console/visual output)
+*   [x] **Accessible Quit (Ctrl+C) with Spoken Shutdown** (no dependency on the sighted-only preview window)
+*   [x] **Urgency Earcons** (instant distinct tones per proximity tier, ahead of the TTS phrase)
+*   [x] **Preemptible Critical Speech** (a "very close" alert can interrupt lower-priority speech in progress)
 
 ---
 
