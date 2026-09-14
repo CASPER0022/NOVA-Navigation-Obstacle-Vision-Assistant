@@ -7,8 +7,18 @@ import time
 import threading
 import queue
 from collections import deque
+import sys
+import atexit
 
 from metrics_logger import MetricsLogger
+
+# winsound is Windows-only (this project already assumes Windows via CAP_DSHOW);
+# degrade gracefully to no earcons on other platforms instead of crashing.
+try:
+    import winsound
+    EARCONS_AVAILABLE = True
+except ImportError:
+    EARCONS_AVAILABLE = False
 
 # Initialize YOLO model
 model = YOLO('yolov8n.pt')
@@ -18,18 +28,28 @@ metrics = MetricsLogger()
 # Thread-safe queue for speech requests
 speech_queue = queue.Queue()
 
+# Reference to whichever pyttsx3 engine is currently mid-utterance, so a
+# critical alert can interrupt it from another thread (see speak() below).
+current_engine = None
+current_engine_lock = threading.Lock()
+
 # Speech worker running in a single dedicated background thread
 def speech_worker():
+    global current_engine
     while True:
         # Block until a speech request is available
-        text = speech_queue.get()
+        priority, text = speech_queue.get()
         try:
             metrics.log_tts_event("attempt", text)
             # Initialize fresh engine inside the loop to avoid Windows COM thread resource issues
             engine = pyttsx3.init()
             engine.setProperty('rate', 170)  # slightly faster speech
+            with current_engine_lock:
+                current_engine = engine
             engine.say(text)
             engine.runAndWait()
+            with current_engine_lock:
+                current_engine = None
             # Clean up reference
             del engine
             metrics.log_tts_event("success", text)
@@ -37,16 +57,18 @@ def speech_worker():
             print(f"Speech worker error: {e}")
             metrics.log_tts_event("error", str(e))
         finally:
-            # Always mark the task done (even on error) so speech_queue.join() below
-            # can't hang, and so metrics.close() waits for in-flight logging to finish.
+            # Always mark the task done, even on failure, so anything waiting
+            # on speech_queue.join() (e.g. the shutdown announcement) can't hang.
             speech_queue.task_done()
 
 # Start the speech worker thread immediately
 threading.Thread(target=speech_worker, daemon=True).start()
 
 
-# Threaded speak function to prevent freezing and ensure message queuing
-def speak(text):
+# Threaded speak function to prevent freezing and ensure message queuing.
+# priority=0 (critical) interrupts whatever is currently being spoken so a
+# "very close" hazard is never delayed behind a lower-priority message.
+def speak(text, priority=1):
     # Clear any pending speech tasks so we only announce the most recent hazard
     while not speech_queue.empty():
         try:
@@ -54,7 +76,38 @@ def speak(text):
             speech_queue.task_done()
         except queue.Empty:
             break
-    speech_queue.put(text)
+
+    if priority == 0:
+        with current_engine_lock:
+            if current_engine is not None:
+                try:
+                    current_engine.stop()
+                except Exception:
+                    pass
+
+    speech_queue.put((priority, text))
+
+
+# Short, distinct tones per proximity tier, played in a background thread so
+# they never block the frame loop. TTS takes time to generate/speak, so an
+# instant earcon lets the user react to urgency before the words finish.
+def play_earcon(proximity):
+    if not EARCONS_AVAILABLE:
+        return
+
+    def _beep():
+        try:
+            if proximity == "very close":
+                winsound.Beep(1200, 100)
+                winsound.Beep(1200, 100)
+            elif proximity == "moderately close":
+                winsound.Beep(800, 150)
+            else:
+                winsound.Beep(500, 150)
+        except RuntimeError:
+            pass
+
+    threading.Thread(target=_beep, daemon=True).start()
 
 
 # Track the last time a warning was spoken to avoid overlapping audio
@@ -83,8 +136,10 @@ def get_best_camera_index():
         return 0
 
     print(f"Detected working camera indices: {working_indices}")
-    selected_index = working_indices[-1]
-    print(f"Auto-selected Camera Index {selected_index} (highest index).")
+    # On laptops with built-in cameras, index 0 is typically the external USB webcam if plugged in,
+    # or index 0 vs 1 depends on system order. If 0 is available, prefer 0 over 1, or let user override.
+    selected_index = working_indices[0] if 0 in working_indices else working_indices[-1]
+    print(f"Auto-selected Camera Index {selected_index} (preferring Index 0 for external USB webcam).")
     return selected_index
 
 
@@ -159,6 +214,61 @@ else:
         camera_index = get_best_camera_index()
     cap = cv2.VideoCapture(camera_index)
 
+# Attempt to recover from a lost/disconnected camera instead of dying silently.
+# Retries for up to max_wait seconds, announcing status changes so a blind user
+# isn't left with a frozen, unexplained silence.
+def reconnect_camera(index, max_wait=30.0, retry_delay=1.0):
+    speak("Camera lost. Reconnecting.", priority=0)
+    print("Camera read failed. Attempting to reconnect...")
+    start_time = time.time()
+    while time.time() - start_time < max_wait:
+        temp_cap = cv2.VideoCapture(index)
+        if temp_cap.isOpened():
+            ret, _ = temp_cap.read()
+            if ret:
+                speak("Camera reconnected.", priority=0)
+                print("Camera reconnected successfully.")
+                return temp_cap
+        temp_cap.release()
+        time.sleep(retry_delay)
+    speak("Camera unavailable. Shutting down.", priority=0)
+    print("Camera reconnection timed out. Giving up.")
+    return None
+
+if not cap.isOpened():
+    cap = reconnect_camera(camera_index)
+    if cap is None:
+        sys.exit(1)
+
+# Accessible shutdown: Ctrl+C works from the terminal without needing to see
+# or focus the (sighted-only) preview window, unlike the 'q' key below. Suppress
+# the raw traceback so it doesn't look like a crash, and always announce the
+# shutdown out loud before the process actually exits.
+def _friendly_keyboard_interrupt(exc_type, exc_value, exc_tb):
+    if exc_type is KeyboardInterrupt:
+        print("\nStop requested. Shutting down.")
+    else:
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+sys.excepthook = _friendly_keyboard_interrupt
+
+def _announce_shutdown():
+    # Runs on every exit path (normal quit, sys.exit, or Ctrl+C) since atexit
+    # fires on interpreter shutdown regardless of how it was triggered.
+    speak("Shutting down.", priority=0)
+    speech_queue.join()
+    if cap is not None:
+        cap.release()
+    cv2.destroyAllWindows()
+
+atexit.register(_announce_shutdown)
+
+# Announce readiness out loud: a blind user can't see console output or the
+# preview window, so this is the only confirmation the system actually started
+# and what it's about to do.
+speak("System ready. Monitoring the path ahead. Press control C in this window to stop.")
+print("System ready. Listening for obstacles.")
+
 # Track inference rate (1 detection run per second)
 last_inference_time = 0
 inference_interval = 1.0  # seconds
@@ -166,14 +276,25 @@ last_inference_duration = 0.0
 # Store the latest bounding boxes to draw between runs
 latest_detections = []
 
+<<<<<<< Updated upstream
 # Rolling frame-time window for FPS measurement
 frame_times = deque(maxlen=60)
 last_fps_log_time = 0.0
+=======
+# Heartbeat: periodically confirm "path clear" so silence can't be mistaken
+# for a frozen/crashed system when no hazards are present.
+last_hazard_free_announcement = 0
+path_clear_interval = 15.0  # seconds between "path clear" reminders
+>>>>>>> Stashed changes
 
 while True:
     ret, frame = cap.read()
     if not ret:
-        break
+        cap.release()
+        cap = reconnect_camera(camera_index)
+        if cap is None:
+            break
+        continue
 
     height, width, _ = frame.shape
     current_time = time.time()
@@ -314,11 +435,28 @@ while True:
             if current_time - last_speech_time > dynamic_cooldown:
                 warning_msg = closest_obstacle['text']
                 print(f"Alert: {warning_msg} (Cooldown: {dynamic_cooldown}s)")
-                speak(warning_msg)
+                # Play an instant earcon before the (slower) TTS phrase, so the
+                # user gets an urgency cue immediately rather than waiting for
+                # speech synthesis to catch up.
+                play_earcon(proximity)
+                # "Very close" hazards are safety-critical: let them interrupt
+                # whatever lower-priority phrase is currently being spoken.
+                speak(warning_msg, priority=0 if proximity == "very close" else 1)
                 speak_ts = time.time()
                 detect_ts = first_seen_ts.get(closest_obstacle['hazard_key'], current_time)
                 metrics.log_alert_latency(closest_obstacle['hazard_key'][0], detect_ts, speak_ts, last_inference_duration)
                 last_speech_time = current_time
+
+            # Reset the clear-path timer so "Path clear" doesn't fire right
+            # after a hazard stops being announced.
+            last_hazard_free_announcement = current_time
+        elif not active_hazards:
+            # Nothing detected at all: periodically confirm the system is alive
+            # and the path is clear, so silence isn't mistaken for a crash/freeze.
+            if current_time - last_hazard_free_announcement > path_clear_interval:
+                print("Heartbeat: Path clear")
+                speak("Path clear")
+                last_hazard_free_announcement = current_time
 
     # 3. Draw the LATEST detections on the live frame (keeps visuals smooth)
     for x1, y1, x2, y2, label, proximity, direction, est_dist in latest_detections:
@@ -373,10 +511,9 @@ while True:
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-cap.release()
-if not args.headless:
-    cv2.destroyAllWindows()
-# Wait for any in-flight speech (and its metrics logging) to finish before closing
-# the log files, so a run that ends right after an alert doesn't race the CSV writes.
-speech_queue.join()
-metrics.close()
+# Cleanup and the spoken shutdown confirmation happen in _announce_shutdown(),
+# registered via atexit, so they run on every exit path (including Ctrl+C).
+def _announce_shutdown_metrics():
+    metrics.close()
+
+atexit.register(_announce_shutdown_metrics)
