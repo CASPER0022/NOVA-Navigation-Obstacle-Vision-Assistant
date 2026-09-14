@@ -49,21 +49,51 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 ### 9. 🎬 Recorded Video / Image Input Mode
 - **Goal:** Run the pipeline against a saved video file or a folder of still images instead of only a live webcam, so demos and regression tests don't require hardware.
 - **Status:** **Completed** 🟢
-- **Details:** `--input <path>` accepts either a video file (handled by `cv2.VideoCapture`) or a directory of images (via a small `ImageDirectoryCapture` shim with the same `read()`/`release()` interface, so the detection loop is unchanged). `--headless` skips `cv2.imshow`/`waitKey` for automated runs. Fixed a pre-existing shutdown race while adding this: the speech worker thread could still be writing to the metrics CSVs after `metrics.close()` ran on a short clip — the main loop now calls `speech_queue.join()` (and the worker now always calls `task_done()`, including on error) before closing the log files.
+- **Details:** `--input <path>` accepts either a video file or a directory of images. `--headless` skips `cv2.imshow`/`waitKey` for automated runs.
+
+### 10. 🔌 Camera Reconnect & Failure Recovery
+- **Goal:** Stop the system from dying silently when the camera disconnects or fails to open.
+- **Status:** **Completed** 🟢
+- **Details:** Added `reconnect_camera()`, which retries opening the camera for up to 30 seconds with a 1-second backoff whenever a frame read fails.
+
+### 11. 💚 Audible "Path Clear" Heartbeat
+- **Goal:** Let the user distinguish "no obstacles detected" from "the system has frozen/crashed".
+- **Status:** **Completed** 🟢
+- **Details:** Speaks `"Path clear"` every 15 seconds when no active hazards are present.
+
+### 12. 🗣️ Spoken Startup Confirmation
+- **Goal:** Confirm the system actually started and is monitoring.
+- **Status:** **Completed** 🟢
+- **Details:** Speaks `"System ready. Monitoring the path ahead."` on initialization.
+
+### 13. ⌨️ Accessible Quit (Ctrl+C) with Spoken Shutdown
+- **Goal:** Remove dependency on the preview window for quitting.
+- **Status:** **Completed** 🟢
+- **Details:** Terminal `Ctrl+C` triggers graceful shutdown, speaking `"Shutting down."` on exit.
+
+### 14. 🔔 Urgency Earcons
+- **Goal:** Give an instant, wordless urgency cue before the spoken phrase.
+- **Status:** **Completed** 🟢
+- **Details:** Plays distinct proximity tones (`winsound.Beep`) in a background thread.
+
+### 15. ⚡ Preemptible Critical Speech
+- **Goal:** Stop a "very close" hazard from being delayed behind a lower-priority phrase.
+- **Status:** **Completed** 🟢
+- **Details:** Priority-0 alerts interrupt active pyttsx3 speech immediately.
 
 ---
 
 ## 🏃 Upcoming Tasks (Next Steps)
 
-### 9. 🧠 Conversational Jarvis LLM Integration
+### 16. 🧠 Conversational Jarvis LLM Integration
 - **Goal:** Feed detections into a Large Language Model (local via Ollama, or online via Gemini API) to generate natural, human-like guidance.
 - **Description:** Send structured obstacle coordinates to the model and instruct it to roleplay as an assistant. Instead of *"bottle 12 o'clock very close"*, it will say: *"Careful, there is a water bottle right in front of you. There is also a chair to your right if you want to rest."*
 
-### 10. 🎙️ Interactive Voice Queries & Wake Word ("Hey Jarvis")
+### 17. 🎙️ Interactive Voice Queries & Wake Word ("Hey Jarvis")
 - **Goal:** Allow the user to ask the system questions.
 - **Description:** Implement an offline speech-to-text (STT) listener. The user can say *"Hey Jarvis, is the path clear?"* or *"Where is my coffee cup?"*, and the system checks the YOLO coordinates to answer dynamically.
 
-### 11. 🗣️ High-Fidelity Neural TTS
+### 18. 🗣️ High-Fidelity Neural TTS
 - **Goal:** Upgrade the robotic speech voice to a premium, natural human voice.
 - **Description:** Switch from basic offline `pyttsx3` to a neural voice synthesizer (like `edge-tts` or ElevenLabs). Choose a British male voice profile (like `en-GB-RyanNeural`) for that premium, conversational Jarvis aesthetic.
 
