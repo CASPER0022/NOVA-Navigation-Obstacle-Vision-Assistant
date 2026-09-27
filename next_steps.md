@@ -81,21 +81,74 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 - **Status:** **Completed** 🟢
 - **Details:** Priority-0 alerts interrupt active pyttsx3 speech immediately.
 
+### 16. 🧱 Modular Package & Test Suite (v1.0)
+- **Goal:** Replace the single global-state script with maintainable, testable modules.
+- **Status:** **Completed** 🟢
+- **Details:** `nova/` package (capture, perception, tracker, alerts, audio, controls, environment, traffic_light, scene, hud, app) plus 50+ pytest tests that need no camera, speakers or model. This also fixed a committed merge-conflict marker that stopped the program from starting, and a crash at the end of `--input` videos.
+
+### 17. 📐 True-Angle Clock Positions & Pinhole Distances
+- **Goal:** Make directions and distances physically correct.
+- **Status:** **Completed** 🟢
+- **Details:** Clock hours now equal 30° (the O&M convention), computed from the camera's field of view (`--hfov`). Distances come from a pinhole model using object height or width, whichever isn't cut off by the frame edge, and err towards "closer".
+
+### 18. 🚶 Walking-Corridor Awareness & Urgency Levels
+- **Goal:** Warn about what is actually in the user's way, not everything in view.
+- **Status:** **Completed** 🟢
+- **Details:** Objects are projected to lateral meters and tested against a configurable corridor. Alerts are critical ("Stop. …", interrupts speech), warning or info.
+
+### 19. 🎯 Multi-Object Tracking, Approach Detection & Time-to-Contact
+- **Goal:** Stable object identities, fewer false alarms, early warning for fast movers.
+- **Status:** **Completed** 🟢
+- **Details:** IoU tracker with debounce and least-squares closing speed. Collision-course objects become critical, and approaching vehicles are announced as such. Unspoken alerts are no longer silently dropped.
+
+### 20. ⌨️ On-Demand Keyboard Commands
+- **Goal:** Let the user ask instead of only being told.
+- **Status:** **Completed** 🟢
+- **Details:** Describe surroundings, "is the path ahead clear?" (with a free-side hint), repeat, quiet mode, pause, detail level, units, speech rate and help. Keys are read from the terminal (screen-reader friendly), and preferences persist to `nova_config.json`.
+
+### 21. 🎧 Spatial (Stereo-Panned) Earcons
+- **Goal:** Convey direction before the words finish.
+- **Status:** **Completed** 🟢
+- **Details:** Synthesised WAV tones whose pitch/pattern encode urgency and whose left/right balance encodes direction.
+
+### 22. 🩺 Camera Health Monitoring
+- **Goal:** Never let "can't see" sound like "path clear".
+- **Status:** **Completed** 🟢
+- **Details:** Detects dark scenes, a blocked lens, blur and a frozen feed, and announces recovery.
+
+### 23. 🚦 Traffic-Light Colour Reading
+- **Goal:** Report the colour of the nearest traffic light.
+- **Status:** **Completed** 🟢
+- **Details:** HSV classification inside the YOLO box, confirmed over two cycles, phrased as "appears …". This is an aid only.
+
+### 24. ⚙️ Configuration File, Units & Voice Selection
+- **Goal:** Personalise NOVA without long command lines.
+- **Status:** **Completed** 🟢
+- **Details:** `nova_config.json` (see `nova_config.example.json`), `--save-config`, meters/steps/feet, `--voice`, `--list-voices`, `--list-cameras`.
+
 ---
 
 ## 🏃 Upcoming Tasks (Next Steps)
 
-### 16. 🧠 Conversational Jarvis LLM Integration
-- **Goal:** Feed detections into a Large Language Model (local via Ollama, or online via Gemini API) to generate natural, human-like guidance.
-- **Description:** Send structured obstacle coordinates to the model and instruct it to roleplay as an assistant. Instead of *"bottle 12 o'clock very close"*, it will say: *"Careful, there is a water bottle right in front of you. There is also a chair to your right if you want to rest."*
+### 25. 🎙️ Voice Commands & Wake Word
+- **Goal:** Hands-free versions of the keyboard commands (the user may be holding a cane).
+- **Description:** An offline STT listener (e.g. Vosk) that maps phrases like *"what's around me?"* or *"is the path clear?"* onto the existing command handlers in `nova/app.py`.
 
-### 17. 🎙️ Interactive Voice Queries & Wake Word ("Hey Jarvis")
-- **Goal:** Allow the user to ask the system questions.
-- **Description:** Implement an offline speech-to-text (STT) listener. The user can say *"Hey Jarvis, is the path clear?"* or *"Where is my coffee cup?"*, and the system checks the YOLO coordinates to answer dynamically.
+### 26. 🪜 Stairs, Kerbs, Poles & Doors
+- **Goal:** Cover hazards that COCO-trained YOLO cannot see.
+- **Description:** Fine-tune on a navigation dataset, or add monocular depth (e.g. Depth Anything / MiDaS) to detect drop-offs and generic obstacles without needing a class label.
 
-### 18. 🗣️ High-Fidelity Neural TTS
-- **Goal:** Upgrade the robotic speech voice to a premium, natural human voice.
-- **Description:** Switch from basic offline `pyttsx3` to a neural voice synthesizer (like `edge-tts` or ElevenLabs). Choose a British male voice profile (like `en-GB-RyanNeural`) for that premium, conversational Jarvis aesthetic.
+### 27. 🔤 Text Reading (OCR) for Signs
+- **Goal:** Read room numbers, shop names and signs on request.
+- **Description:** A key or voice command that runs OCR (e.g. PaddleOCR/EasyOCR) on the current frame and reads out the largest text.
+
+### 28. 🧠 Conversational LLM Guidance
+- **Goal:** Natural-language scene descriptions on demand.
+- **Description:** Feed the structured detections (already produced for `describe_scene`) to a small local model for richer answers. Keep all safety alerts on the fast rule-based path (see the design strategy below).
+
+### 29. 🗣️ High-Fidelity Neural TTS
+- **Goal:** A more natural voice.
+- **Description:** A pluggable backend in `nova/audio.py` (e.g. `edge-tts` or Piper for offline use) alongside `Pyttsx3Backend`.
 
 ---
 
