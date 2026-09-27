@@ -34,6 +34,7 @@ class Settings:
     max_alert_distance: float = 6.0
     corridor_half_width: float = 0.5   # half the width of the walking path in front of the user
     critical_ttc: float = 2.0          # time-to-contact below which an approaching object is critical
+    critical_repeats: int = 2          # times a critical object is announced before going quiet
 
     # --- Speech & audio --------------------------------------------------
     speech_rate: int = 175
@@ -59,6 +60,8 @@ class Settings:
             raise ValueError("camera_hfov_deg must be between 10 and 170")
         if not 0 < self.critical_distance < self.warning_distance <= self.max_alert_distance:
             raise ValueError("need 0 < critical_distance < warning_distance <= max_alert_distance")
+        if self.critical_repeats < 1:
+            raise ValueError("critical_repeats must be >= 1")
         if self.inference_interval < 0:
             raise ValueError("inference_interval must be >= 0")
         return self

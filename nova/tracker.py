@@ -31,6 +31,7 @@ class Track:
         self.smoothed_distance = detection.distance
         self.history = deque(maxlen=12)  # (timestamp, distance)
         self.history.append((now, detection.distance))
+        self.detection = detection
 
     def update(self, detection, now, alpha=0.5):
         self.bbox = detection.bbox
@@ -38,6 +39,7 @@ class Track:
         self.hits += 1
         self.smoothed_distance = alpha * detection.distance + (1 - alpha) * self.smoothed_distance
         self.history.append((now, detection.distance))
+        self.detection = detection
 
     def closing_speed(self, window=1.5, min_samples=4, min_span=0.75):
         """Least-squares slope of distance over the recent window, negated so that
@@ -102,3 +104,8 @@ class Tracker:
             del self.tracks[tid]
 
         return detections
+
+    def recent(self, now, window=1.0):
+        """Latest detection of every object seen within `window` seconds. Used for
+        on-demand descriptions, so one missed frame doesn't mean "nothing here"."""
+        return [t.detection for t in self.tracks.values() if now - t.last_seen <= window]

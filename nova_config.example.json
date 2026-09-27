@@ -8,6 +8,7 @@
   "max_alert_distance": 6.0,
   "corridor_half_width": 0.5,
   "critical_ttc": 2.0,
+  "critical_repeats": 2,
   "speech_rate": 175,
   "voice": "Zira",
   "volume": 1.0,

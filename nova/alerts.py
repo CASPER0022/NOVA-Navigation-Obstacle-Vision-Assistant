@@ -17,15 +17,21 @@ from dataclasses import dataclass
 
 from .perception import PERSON, VEHICLE, ANIMAL, SIGNAL
 from .phrasing import object_phrase, capitalize
+from .tracker import iou
 
 CRITICAL, WARNING, INFO = 0, 1, 2
 URGENCY_NAMES = {CRITICAL: "critical", WARNING: "warning", INFO: "info"}
 
 APPROACH_SPEED = 0.35       # m/s closing speed that counts as "approaching"
 MIN_HITS = 2                # detector runs an object must survive before a non-critical alert
-REMINDER_INTERVAL = {CRITICAL: 4.0, WARNING: 10.0}
+REMINDER_INTERVAL = 6.0     # seconds before the (single) critical repeat
 MIN_GAP = {CRITICAL: 0.0, WARNING: 1.5, INFO: 3.0}  # min seconds since last speech
-PATH_CLEAR_DEBOUNCE = 1.0
+PATH_CLEAR_DEBOUNCE = 3.0
+# The detector often loses an object for a moment or relabels it (TV -> laptop).
+# A new track that overlaps something announced within REACQUIRE_SECONDS is
+# treated as the same object, so it doesn't get announced all over again.
+REACQUIRE_SECONDS = 3.0
+REACQUIRE_IOU = 0.3
 
 
 @dataclass
@@ -77,7 +83,9 @@ def pan_for(det, hfov_deg=60.0):
 class AlertPolicy:
     def __init__(self, settings):
         self.s = settings
-        self._announced = {}          # track id -> (urgency, time)
+        # track id -> {"urgency", "time", "count", "bbox", "last_seen"} for
+        # everything already announced (kept briefly after the track is lost).
+        self._announced = {}
         self.last_speech_time = -math.inf
         self.last_urgency = INFO
         self._path_blocked = False
@@ -96,10 +104,7 @@ class AlertPolicy:
     def update(self, detections, now):
         """Return an Announcement or None for this detector cycle."""
         s = self.s
-        live_ids = {d.track_id for d in detections}
-        for tid in list(self._announced):
-            if tid not in live_ids:
-                del self._announced[tid]
+        self._refresh_memory(detections, now)
 
         candidates = []
         for det in detections:
@@ -112,8 +117,6 @@ class AlertPolicy:
             if self._due(det.track_id, urgency, now):
                 candidates.append((urgency, det.distance, det))
 
-        blocking = [d for d in detections
-                    if d.in_path and classify(d, s) in (CRITICAL, WARNING)]
         announcement = None
 
         if candidates:
@@ -122,6 +125,11 @@ class AlertPolicy:
             gap = now - self.last_speech_time
             if gap >= MIN_GAP[urgency] or urgency < self.last_urgency:
                 announcement = self._hazard_announcement(det, urgency, candidates, now)
+
+        in_path = [d for d in detections
+                   if d.in_path and classify(d, s) in (CRITICAL, WARNING)]
+        # Only obstacles the user was actually warned about can later be "cleared".
+        blocking = [d for d in in_path if d.track_id in self._announced]
 
         # Path-clear feedback: once when a blocking obstacle leaves the path, and
         # periodically as a heartbeat so silence isn't mistaken for a frozen system.
@@ -135,7 +143,7 @@ class AlertPolicy:
                 elif now - self._clear_since >= PATH_CLEAR_DEBOUNCE:
                     self._path_blocked = False
                     announcement = Announcement("Path clear ahead", INFO, kind="path_clear")
-            elif (now - self.last_speech_time >= s.path_clear_interval
+            elif (not in_path and now - self.last_speech_time >= s.path_clear_interval
                   and now - self._last_path_clear >= s.path_clear_interval):
                 announcement = Announcement("Path clear", INFO, kind="path_clear")
 
@@ -146,15 +154,40 @@ class AlertPolicy:
                 self._last_path_clear = now
         return announcement
 
+    def _refresh_memory(self, detections, now):
+        live = {d.track_id: d for d in detections}
+        for tid, state in self._announced.items():
+            if tid in live:
+                state["bbox"] = live[tid].bbox
+                state["last_seen"] = now
+        for tid in [t for t, st in self._announced.items()
+                    if now - st["last_seen"] > REACQUIRE_SECONDS]:
+            del self._announced[tid]
+        # Hand the memory of a lost/relabelled object over to its new track.
+        for tid, det in live.items():
+            if tid in self._announced:
+                continue
+            best, best_iou = None, REACQUIRE_IOU
+            for old_tid, state in self._announced.items():
+                if old_tid in live:
+                    continue
+                overlap = iou(det.bbox, state["bbox"])
+                if overlap >= best_iou:
+                    best, best_iou = old_tid, overlap
+            if best is not None:
+                self._announced[tid] = self._announced.pop(best)
+
     def _due(self, track_id, urgency, now):
-        previous = self._announced.get(track_id)
-        if previous is None:
+        """New objects are announced; an announced object speaks again only if it
+        becomes more urgent, or once more (critical only) after REMINDER_INTERVAL.
+        After that it stays silent - Space describes it on demand."""
+        state = self._announced.get(track_id)
+        if state is None or urgency < state["urgency"]:
             return True
-        prev_urgency, prev_time = previous
-        if urgency < prev_urgency:
-            return True
-        interval = REMINDER_INTERVAL.get(urgency)
-        return interval is not None and now - prev_time >= interval
+        if urgency > state["urgency"]:
+            return False
+        limit = self.s.critical_repeats if urgency == CRITICAL else 1
+        return state["count"] < limit and now - state["time"] >= REMINDER_INTERVAL
 
     def _hazard_announcement(self, det, urgency, candidates, now):
         s = self.s
@@ -168,5 +201,8 @@ class AlertPolicy:
                                approaching=approaching)
         text = f"Stop. {capitalize(phrase)}" if urgency == CRITICAL else capitalize(phrase)
         for d in group:
-            self._announced[d.track_id] = (urgency, now)
+            state = self._announced.get(d.track_id)
+            count = state["count"] + 1 if state and state["urgency"] == urgency else 1
+            self._announced[d.track_id] = {"urgency": urgency, "time": now, "count": count,
+                                           "bbox": d.bbox, "last_seen": now}
         return Announcement(text, urgency, pan=pan_for(det, s.camera_hfov_deg), detection=det)

@@ -40,7 +40,8 @@ class NovaApp:
         self.lights = TrafficLightMonitor() if settings.traffic_lights else None
         self.detector = None
         self.env = None
-        self.detections = []
+        self.detections = []       # this cycle's detections (HUD, alerts)
+        self.recent_objects = []   # everything seen in the last second (on-demand answers)
         self.paused = False
         self.running = True
         self.preferences_changed = False
@@ -70,9 +71,9 @@ class NovaApp:
         s = self.s
         if command == "describe":
             prefix = "Paused. Last seen: " if self.paused else ""
-            self.announce(prefix + describe_scene(self.detections, s))
+            self.announce(prefix + describe_scene(self.recent_objects, s))
         elif command == "ahead":
-            self.announce(describe_path(self.detections, s))
+            self.announce(describe_path(self.recent_objects, s))
         elif command == "repeat":
             self.speech.repeat_last()
         elif command == "quiet":
@@ -174,6 +175,7 @@ class NovaApp:
         inference_duration = time.time() - started
         self.tracker.update(detections, now)
         self.detections = detections
+        self.recent_objects = self.tracker.recent(now)
 
         if self.env:
             message = self.env.update(frame, now)
