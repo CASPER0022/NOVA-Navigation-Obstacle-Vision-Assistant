@@ -22,6 +22,7 @@ class MetricsLogger:
         )
         self._fps_file = self._open_with_header(self._fps_path, ["timestamp", "fps"])
 
+        self._closed = False
         self._latency_writer = csv.writer(self._latency_file)
         self._tts_writer = csv.writer(self._tts_file)
         self._fps_writer = csv.writer(self._fps_file)
@@ -36,20 +37,28 @@ class MetricsLogger:
         return f
 
     def log_alert_latency(self, label, detect_ts, speak_ts, inference_duration):
+        if self._closed:
+            return
         self._latency_writer.writerow(
             [time.time(), label, detect_ts, speak_ts, speak_ts - detect_ts, inference_duration]
         )
         self._latency_file.flush()
 
     def log_tts_event(self, event_type, message=""):
+        # Speech runs on its own thread and may finish after close() during shutdown.
+        if self._closed:
+            return
         self._tts_writer.writerow([time.time(), event_type, message])
         self._tts_file.flush()
 
     def log_fps_sample(self, fps):
+        if self._closed:
+            return
         self._fps_writer.writerow([time.time(), fps])
         self._fps_file.flush()
 
     def close(self):
+        self._closed = True
         self._latency_file.close()
         self._tts_file.close()
         self._fps_file.close()
