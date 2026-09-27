@@ -164,3 +164,6 @@ runs/
 
 # Metrics logs (run artifacts, not source)
 logs/
+
+# Personal NOVA preferences (see nova_config.example.json)
+nova_config.json

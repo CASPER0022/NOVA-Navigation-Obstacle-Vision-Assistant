@@ -1,0 +1,22 @@
+{
+  "model": "yolov8n.pt",
+  "confidence": 0.4,
+  "inference_interval": 0.25,
+  "camera_hfov_deg": 60.0,
+  "critical_distance": 1.2,
+  "warning_distance": 2.5,
+  "max_alert_distance": 6.0,
+  "corridor_half_width": 0.5,
+  "critical_ttc": 2.0,
+  "speech_rate": 175,
+  "voice": "Zira",
+  "volume": 1.0,
+  "earcons": true,
+  "units": "meters",
+  "step_length": 0.7,
+  "verbosity": "normal",
+  "path_clear_interval": 20.0,
+  "traffic_lights": true,
+  "environment_checks": true,
+  "log_dir": "logs"
+}
