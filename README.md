@@ -40,7 +40,7 @@ The project is inspired by the research paper *"A review of assistive spatial or
 *   **Three urgency levels.** *Critical* (something in your walking path within ~1.2 m, or on a collision course) says **"Stop. Chair ahead, 1 step"** and interrupts any other speech. *Warning* covers things in your path within ~2.5 m, anything very close at your side, and approaching vehicles. *Info* covers everything else in range.
 *   **Walking-corridor awareness.** Every object's sideways offset is converted into meters. Only objects that overlap a ~1 m-wide corridor in front of you count as "in your path", so a person 3 m away off to the side doesn't trigger a warning.
 *   **Approach detection and time-to-contact.** Tracking each object's distance over time gives a closing speed. A cyclist closing fast is flagged before it's "close", and vehicles are announced as *"Car approaching at 2 o'clock"*.
-*   **No lost or repeated alerts.** Stable track IDs mean an object isn't re-announced every time it moves slightly, and two people side by side are two hazards. Warnings the system didn't have time to say are kept and spoken next rather than dropped. A single-frame false detection has to persist before it's announced (critical ones are announced immediately).
+*   **No lost or repeated alerts.** Stable track IDs mean an object isn't re-announced every time it moves slightly, and two people side by side are two hazards. Warnings the system didn't have time to say are kept and spoken next rather than dropped. A single-frame false detection has to persist before it's announced (critical ones are announced immediately). Each object is announced **once**, or **twice** if critical, then NOVA stays quiet about it. It speaks again only if the object becomes more urgent. Press `Space` any time for a full description. Objects that YOLO briefly loses or relabels (TV → laptop) are recognised as the same object and aren't repeated.
 *   **"Path clear ahead" feedback** as soon as a blocking obstacle leaves your path, plus a periodic *"Path clear"* heartbeat, so silence is never mistaken for a frozen system.
 
 ### Accurate directions and distances
@@ -122,6 +122,7 @@ Precedence: built-in defaults → `nova_config.json` → command-line flags. Use
 | `max_alert_distance` | 6 m | Ignore things farther than this |
 | `corridor_half_width` | 0.5 m | Half-width of your walking path |
 | `critical_ttc` | 2 s | Time-to-contact that counts as critical |
+| `critical_repeats` | 2 | How many times a critical object is announced before NOVA goes quiet about it (1 = once) |
 | `inference_interval` | 0.25 s | Seconds between detector runs on a live camera (0 = every frame; `--input` always analyses every frame) |
 | `units`, `step_length`, `verbosity`, `speech_rate`, `voice`, `volume` | | Speech preferences |
 | `earcons`, `traffic_lights`, `environment_checks`, `path_clear_interval` | | Feature switches |

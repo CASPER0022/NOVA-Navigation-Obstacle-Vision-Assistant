@@ -126,6 +126,11 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 - **Status:** **Completed** 🟢
 - **Details:** `nova_config.json` (see `nova_config.example.json`), `--save-config`, meters/steps/feet, `--voice`, `--list-voices`, `--list-cameras`.
 
+### 24b. 🤫 Announce-Once Alerting
+- **Goal:** Stop repeated "Stop." alerts about an object the user already knows about.
+- **Status:** **Completed** 🟢
+- **Details:** Warnings are said once and critical alerts at most `critical_repeats` times (default 2). An object speaks again only if its urgency rises. Short dropouts and label flicker (TV ↔ laptop) keep the same memory. Space/A answer from everything seen in the last second instead of a single frame.
+
 ---
 
 ## 🏃 Upcoming Tasks (Next Steps)
