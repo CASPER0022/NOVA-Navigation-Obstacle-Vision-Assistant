@@ -43,7 +43,7 @@ def test_every_key_command_is_handled(tmp_path, monkeypatch):
 
 def test_describe_quiet_pause_and_preferences(tmp_path, monkeypatch):
     app = make_app(tmp_path, monkeypatch)
-    app.detections = [make_det("chair", 2.0)]
+    app.recent_objects = [make_det("chair", 2.0)]
     assert spoken_after(app, "describe") == "1 object. Chair ahead, 2 meters."
     assert spoken_after(app, "ahead") == "Chair in your path, 2 meters."
     assert spoken_after(app, "quiet").startswith("Quiet mode on")
