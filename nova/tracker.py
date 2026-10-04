@@ -8,6 +8,10 @@ Gives each physical object a stable id across detector runs so that:
 """
 from collections import deque
 
+# Distance history is kept by age, not by count: at ~25 detector runs per second
+# (recorded video, or --inference-interval 0) a fixed number of samples would
+# cover too short a span to ever measure a closing speed.
+HISTORY_SECONDS = 2.0
 
 def iou(a, b):
     ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
@@ -29,7 +33,7 @@ class Track:
         self.last_seen = now
         self.hits = 1
         self.smoothed_distance = detection.distance
-        self.history = deque(maxlen=12)  # (timestamp, distance)
+        self.history = deque()  # (timestamp, distance), last HISTORY_SECONDS only
         self.history.append((now, detection.distance))
         self.detection = detection
 
@@ -39,6 +43,8 @@ class Track:
         self.hits += 1
         self.smoothed_distance = alpha * detection.distance + (1 - alpha) * self.smoothed_distance
         self.history.append((now, detection.distance))
+        while now - self.history[0][0] > HISTORY_SECONDS:
+            self.history.popleft()
         self.detection = detection
 
     def closing_speed(self, window=1.5, min_samples=4, min_span=0.75):

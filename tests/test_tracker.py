@@ -65,3 +65,15 @@ def test_jittery_static_object_is_not_approaching_on_short_history():
         d = det((100, 100, 200, 300), dist)
         t.update([d], now=i * 0.25)
     assert d.closing_speed == 0.0
+
+
+def test_closing_speed_at_high_frame_rate():
+    # 25 detector runs per second (recorded video): a count-limited history would
+    # only cover ~0.5 s and never report a closing speed.
+    tracker = Tracker()
+    for i in range(50):
+        t = i / 25
+        d = det((100, 100, 200, 300), 5.0 - 1.0 * t)
+        tracker.update([d], t)
+    assert d.closing_speed == pytest.approx(1.0, abs=0.15)
+    assert tracker.tracks[d.track_id].history[0][0] >= t - 2.0
