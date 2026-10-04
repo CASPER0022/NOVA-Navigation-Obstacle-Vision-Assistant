@@ -21,6 +21,7 @@ class Settings:
     camera: int = None          # None = auto-scan
     input: str = None           # video file or image directory instead of a camera
     headless: bool = False      # no preview window
+    record: str = None          # save the annotated view to this video file (.mp4 / .avi)
 
     # --- Detection -------------------------------------------------------
     model: str = "yolov8n.pt"
@@ -45,6 +46,10 @@ class Settings:
     step_length: float = 0.7           # meters per step, used when units == "steps"
     verbosity: str = "normal"
     path_clear_interval: float = 20.0
+
+    # --- Display ---------------------------------------------------------
+    radar: bool = True                 # bird's-eye panel beside the camera view
+    captions: bool = True              # on-screen subtitles of everything spoken
 
     # --- Extras ----------------------------------------------------------
     traffic_lights: bool = True

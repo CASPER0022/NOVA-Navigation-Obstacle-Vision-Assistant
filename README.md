@@ -26,6 +26,10 @@ The project is inspired by the research paper *"A review of assistive spatial or
               │                                        reminders, verbosity, path-clear feedback
               ▼
  [ Speech + spatial earcons ]     nova/audio.py        priority slot, interruptible, quiet mode
+              │
+              ▼
+ [ HUD + radar + captions ]       nova/hud.py, radar.py, captions.py   preview window
+ [ Video recorder ]               nova/recorder.py     --record demo.mp4
               ▲
  [ Keyboard commands ]            nova/controls.py     works from the terminal, no window needed
 ```
@@ -76,6 +80,9 @@ Changes made with `V`, `U` and `+`/`-` are **saved automatically** to `nova_conf
 *   **Traffic-light colour reading.** *"Traffic light at 12 o'clock appears red"*, then *"…changed to green"*. This is an aid only; see the safety notice above.
 *   **Camera reconnect**, spoken startup/shutdown, and the model is warmed up before "ready" so the first obstacle isn't delayed.
 *   **Preview HUD** for sighted helpers and low-vision users. Boxes are coloured by urgency and show distance and clock position. It also draws true clock sectors, the walking corridor, and an arrow to the nearest hazard.
+*   **Bird's-eye radar view** beside the camera image: a top-down map of every tracked object at its estimated distance and sideways offset in meters, drawn as a bar as wide as the object. The walking corridor is shaded red/orange where an object would be critical or a warning, and approaching objects get an arrow showing where they'll be in one second. It shows exactly why NOVA does or doesn't consider something "in your path". Turn it off with `--no-radar`.
+*   **Live captions** of everything NOVA says, coloured by urgency (red critical, orange warning, green info), so a helper or an audience can follow the audio. Turn them off with `--no-captions`.
+*   **Demo recording.** `--record demo.mp4` saves the full annotated view (camera, HUD, radar, captions) to a video, from a live camera or from `--input`. Live recordings play back at real-time speed.
 *   **Metrics** (alert latency, TTS reliability, FPS) are logged to `logs/`. Summarise them with `analyze_metrics.py`.
 
 ---
@@ -101,6 +108,8 @@ python assistive_system.py                          # auto-select camera
 python assistive_system.py --camera 1               # or legacy: python assistive_system.py 1
 python assistive_system.py --units steps --verbosity minimal --voice Zira
 python assistive_system.py --input clip.mp4 --headless   # recorded video / image folder
+python assistive_system.py --record demo.mp4        # save annotated view + captions to video
+python assistive_system.py --input clip.mp4 --headless --record out.mp4   # annotate a clip offline
 python assistive_system.py --list-cameras
 python assistive_system.py --list-voices
 python assistive_system.py --help                   # every option
@@ -126,6 +135,7 @@ Precedence: built-in defaults → `nova_config.json` → command-line flags. Use
 | `inference_interval` | 0.25 s | Seconds between detector runs on a live camera (0 = every frame; `--input` always analyses every frame) |
 | `units`, `step_length`, `verbosity`, `speech_rate`, `voice`, `volume` | | Speech preferences |
 | `earcons`, `traffic_lights`, `environment_checks`, `path_clear_interval` | | Feature switches |
+| `radar`, `captions` | true | Bird's-eye panel and on-screen subtitles |
 
 ### Metrics
 ```bash
@@ -141,7 +151,7 @@ python analyze_metrics.py --compare logs_a logs_b
 pip install -r requirements-dev.txt
 python -m pytest tests
 ```
-The suite covers geometry (clock angles, distance, walking corridor), tracking and closing speed, the alert policy (urgency, debounce, escalation, reminders, grouping, verbosity, path-clear), scene descriptions, camera-health checks, traffic-light colours, speech priority handling, config loading and every keyboard command. None of the tests need a camera, speakers or the YOLO model.
+The suite covers geometry (clock angles, distance, walking corridor), tracking and closing speed, the alert policy (urgency, debounce, escalation, reminders, grouping, verbosity, path-clear), scene descriptions, camera-health checks, traffic-light colours, speech priority handling, config loading, every keyboard command, the radar projection, caption timing and the video recorder. None of the tests need a camera, speakers or the YOLO model.
 
 ---
 

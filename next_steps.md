@@ -131,6 +131,16 @@ This document outlines the features and milestones of the **NOVA (Navigation & O
 - **Status:** **Completed** 🟢
 - **Details:** Warnings are said once and critical alerts at most `critical_repeats` times (default 2). An object speaks again only if its urgency rises. Short dropouts and label flicker (TV ↔ laptop) keep the same memory. Space/A answer from everything seen in the last second instead of a single frame.
 
+### 24c. 🛰️ Bird's-Eye Radar View
+- **Goal:** Make NOVA's spatial reasoning visible.
+- **Status:** **Completed** 🟢
+- **Details:** `nova/radar.py` renders a top-down panel beside the camera view: field-of-view wedge, 1 m range rings, the walking corridor shaded by critical/warning bands, each tracked object as a bar spanning its real width in meters (with track id), and a one-second prediction arrow for approaching objects.
+
+### 24d. 🎬 Demo Recording with Live Captions
+- **Goal:** A reliable demo that doesn't depend on a live camera, where viewers can see what the user hears.
+- **Status:** **Completed** 🟢
+- **Details:** `--record demo.mp4` saves the composed view (HUD, radar, captions). Live recordings are written on a fixed 15 fps timeline so playback runs at real-time speed. Recorded input keeps the source frame rate. `nova/captions.py` shows every spoken message as an urgency-coloured subtitle, and works in the live window too.
+
 ---
 
 ## 🏃 Upcoming Tasks (Next Steps)

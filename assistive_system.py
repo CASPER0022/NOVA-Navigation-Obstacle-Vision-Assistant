@@ -3,6 +3,7 @@
     python assistive_system.py                     # auto-select camera
     python assistive_system.py --camera 1          # (or legacy: python assistive_system.py 1)
     python assistive_system.py --input clip.mp4 --headless
+    python assistive_system.py --record demo.mp4       # save the annotated view
     python assistive_system.py --units steps --verbosity minimal --save-config
 
 Run with --help for every option. Preferences can also live in nova_config.json.
@@ -28,6 +29,8 @@ def parse_args(argv=None):
     src.add_argument("--input", help="video file or image directory instead of a camera")
     src.add_argument("--headless", action="store_true", default=None,
                      help="no preview window")
+    src.add_argument("--record", metavar="PATH",
+                     help="save the annotated view (camera, radar, captions) to a video file")
     src.add_argument("--list-cameras", action="store_true", help="list working cameras and exit")
     src.add_argument("--log-dir", help="where metrics CSVs are written (default logs)")
 
@@ -38,6 +41,12 @@ def parse_args(argv=None):
                      help="camera horizontal field of view in degrees (default 60)")
     det.add_argument("--inference-interval", type=float,
                      help="seconds between detector runs (default 0.25; 0 = every frame)")
+
+    disp = p.add_argument_group("display")
+    disp.add_argument("--no-radar", dest="radar", action="store_false", default=None,
+                      help="hide the bird's-eye panel")
+    disp.add_argument("--no-captions", dest="captions", action="store_false", default=None,
+                      help="hide on-screen subtitles of spoken messages")
 
     out = p.add_argument_group("speech & audio")
     out.add_argument("--units", choices=UNITS)
@@ -78,7 +87,7 @@ def main(argv=None):
     config_path = args.config or DEFAULT_CONFIG_PATH
     if args.save_config:
         data = settings.to_dict()
-        for transient in ("camera", "input", "headless"):
+        for transient in ("camera", "input", "headless", "record"):
             data.pop(transient)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)

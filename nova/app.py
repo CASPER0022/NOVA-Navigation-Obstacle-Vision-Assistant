@@ -5,18 +5,21 @@ import time
 from collections import deque
 
 import cv2
+import numpy as np
 
 from metrics_logger import MetricsLogger
 
-from . import hud
+from . import captions as captions_overlay, hud, radar
 from .alerts import AlertPolicy, CRITICAL, WARNING, INFO, URGENCY_NAMES
 from .audio import (Speech, Pyttsx3Backend, Earcons,
                     CRITICAL_PRIORITY, NORMAL_PRIORITY, LOW_PRIORITY)
+from .captions import Captions
 from .capture import FrameSource
 from .config import UNITS, VERBOSITY_LEVELS
 from .controls import KeyboardControls, HELP_TEXT
 from .environment import EnvironmentMonitor
 from .perception import CameraGeometry, Detector
+from .recorder import Recorder
 from .scene import describe_scene, describe_path
 from .tracker import Tracker
 from .traffic_light import TrafficLightMonitor
@@ -45,23 +48,38 @@ class NovaApp:
         self.paused = False
         self.running = True
         self.preferences_changed = False
+        self.captions = Captions()
+        self.recorder = None
+        self._media_fps = None     # set for recorded input: captions follow video time
+        self._frames_read = 0
         self._geometry = None
         self._last_inference = 0.0
         self._last_pause_reminder = 0.0
 
     # ------------------------------------------------------------------ speech
+    def _clock(self):
+        """Timeline for captions: wall time live, video time for recorded input."""
+        if self._media_fps:
+            return self._frames_read / self._media_fps
+        return time.time()
+
+    def _caption(self, text, kind):
+        self.captions.add(text, kind, self._clock())
+
     def announce(self, text, priority=NORMAL_PRIORITY, force=True, earcon=None):
         print(f"NOVA: {text}")
         if earcon:
             self.earcons.play(earcon)
-        self.speech.say(text, priority, force=force)
+        if self.speech.say(text, priority, force=force):
+            self._caption(text, earcon or "status")
         self.policy.note_spoken(time.time())
 
     def _deliver(self, ann, inference_duration):
         kind = "path_clear" if ann.kind == "path_clear" else URGENCY_NAMES[ann.urgency]
         print(f"[{kind}] {ann.text}")
         self.earcons.play(kind, ann.pan)
-        self.speech.say(ann.text, SPEECH_PRIORITY[ann.urgency])
+        if self.speech.say(ann.text, SPEECH_PRIORITY[ann.urgency]):
+            self._caption(ann.text, kind)
         if ann.detection is not None:
             self.metrics.log_alert_latency(ann.detection.label, ann.detection.first_seen,
                                            time.time(), inference_duration)
@@ -76,6 +94,8 @@ class NovaApp:
             self.announce(describe_path(self.recent_objects, s))
         elif command == "repeat":
             self.speech.repeat_last()
+            if self.speech.last_text:
+                self._caption(self.speech.last_text, "status")
         elif command == "quiet":
             self.speech.quiet = not self.speech.quiet
             self.announce("Quiet mode on. Only urgent warnings." if self.speech.quiet
@@ -119,6 +139,11 @@ class NovaApp:
             return 1
         if s.environment_checks:
             self.env = EnvironmentMonitor(check_frozen=not source.is_image_dir)
+        if not source.is_live:
+            self._media_fps = source.fps
+            self.captions.clear()  # earlier captions were stamped with wall time
+        if s.record:
+            self.recorder = Recorder(s.record, fps=source.fps, realtime=source.is_live)
         self.controls.start()
         self.announce("NOVA ready. Monitoring the path ahead. Press H for help, Q to quit.")
 
@@ -136,6 +161,7 @@ class NovaApp:
                         self.announce("End of recording.")
                     break
                 now = time.time()
+                self._frames_read += 1
 
                 frame_times.append(now)
                 if len(frame_times) >= 2 and frame_times[-1] > frame_times[0]:
@@ -157,8 +183,12 @@ class NovaApp:
                     self._last_inference = now
                     self._process(frame, now)
 
-                if not s.headless:
-                    self._show(frame, fps)
+                if not s.headless or self.recorder:
+                    view = self._compose(frame, fps)
+                    if self.recorder:
+                        self.recorder.write(view, now)
+                    if not s.headless:
+                        self._show(view)
         except KeyboardInterrupt:
             print("\nStop requested.")
         finally:
@@ -190,7 +220,12 @@ class NovaApp:
         if announcement:
             self._deliver(announcement, inference_duration)
 
-    def _show(self, frame, fps):
+    def _compose(self, frame, fps):
+        """Camera view with HUD and captions, plus the bird's-eye panel."""
+        h, w = frame.shape[:2]
+        if self._geometry is None or (self._geometry.width, self._geometry.height) != (w, h):
+            self._geometry = CameraGeometry(w, h, self.s.camera_hfov_deg)
+        detections = [] if self.paused else self.detections
         flags = []
         if self.paused:
             flags.append("PAUSED")
@@ -200,8 +235,14 @@ class NovaApp:
             flags.append(self.env.state.upper())
         status = (f"FPS {fps:4.1f} | {self.s.verbosity} | {self.s.units} | "
                   f"rate {self.speech.backend.rate} " + " ".join(flags))
-        if self._geometry is not None:
-            hud.draw(frame, [] if self.paused else self.detections, self._geometry, self.s, status)
+        hud.draw(frame, detections, self._geometry, self.s, status)
+        if self.s.captions:
+            captions_overlay.draw(frame, self.captions.active(self._clock()))
+        if self.s.radar:
+            frame = np.hstack([frame, radar.render(h, detections, self._geometry, self.s)])
+        return frame
+
+    def _show(self, frame):
         cv2.imshow("NOVA", frame)
         key = cv2.waitKey(1) & 0xFF
         if key != 255:
@@ -214,6 +255,8 @@ class NovaApp:
         self.speech.wait_idle(timeout=5.0)
         if source is not None:
             source.release()
+        if self.recorder:
+            self.recorder.close()
         cv2.destroyAllWindows()
         self.metrics.close()
         if self.preferences_changed and self.config_path:

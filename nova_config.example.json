@@ -17,6 +17,8 @@
   "step_length": 0.7,
   "verbosity": "normal",
   "path_clear_interval": 20.0,
+  "radar": true,
+  "captions": true,
   "traffic_lights": true,
   "environment_checks": true,
   "log_dir": "logs"

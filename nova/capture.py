@@ -89,6 +89,16 @@ class FrameSource:
             if not self.cap.isOpened() and not self._reconnect():
                 raise RuntimeError("Camera unavailable")
 
+    @property
+    def fps(self):
+        """Nominal frame rate of recorded input (None for a live camera)."""
+        if self.is_live:
+            return None
+        if self.is_image_dir:
+            return 2.0
+        fps = self.cap.get(cv2.CAP_PROP_FPS)
+        return fps if fps and fps > 0 else 30.0
+
     def read(self):
         ok, frame = self.cap.read()
         if ok:
